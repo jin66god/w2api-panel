@@ -7,6 +7,20 @@ name: docker-ghcr
 on:
   push:
     branches: [main]
+    # 只在构建相关文件变化时跑（tag push 走同一过滤，但发版必然改
+    # cmd/server/main.go 的 appVersion，故不会被挡住）。纯文档改动不再触发
+    # 双架构 QEMU 构建（单次约 5 分钟）。
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "scripts/**"
+      - "*.sh"
+      - "config.example.json"
+      - ".github/workflows/docker-ghcr.yml"
     tags: ["v*"]
   pull_request:
     paths:
@@ -22,11 +36,11 @@ on:
       - ".github/workflows/docker-ghcr.yml"
   workflow_dispatch:
 
-# 并发组：PR 取消过时构建；main/tag 按引用串行——发版时 main+tag 同推不再双跑
-# 同一份代码的多架构构建（QEMU arm64 一次不便宜）。
+# 并发组：按 workflow+ref 分组（main 与 tag 各一组，互不取消——tag 的发布运行
+# 永远安全）。非 tag 的新运行会取消同 ref 的旧运行（连续推 main 不排队占额度）。
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 env:
   REGISTRY: ghcr.io
@@ -36,6 +50,8 @@ env:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    # 双架构 QEMU 构建约 5 分钟；给足余量但设上限，防异常挂死吃满 6h 额度。
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write

@@ -8,6 +8,15 @@ name: go-binaries
 on:
   push:
     branches: [main]
+    # 只在这些路径变化时跑（tag push 也走同一 paths 过滤，但发版必然改
+    # cmd/server/main.go 的 appVersion，故不会被挡住）。
+    paths:
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - "config.example.json"
+      - ".github/workflows/go-binaries.yml"
     tags: ["v*"]
   pull_request:
     paths:
@@ -21,7 +30,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # tag 的运行（发布）永不取消；main / PR 的旧运行被新运行取消，避免排队白占额度。
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 permissions:
   contents: read
@@ -29,6 +39,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -39,7 +50,11 @@ jobs:
 
   build:
     needs: test
+    # main 分支 push 只跑 test：跨平台编译在 tag（发版）、PR 与手动触发时全量验证，
+    # 省掉每次 main push 的 5 个矩阵 job（发布路径不受影响）。
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name != 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -103,6 +118,7 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

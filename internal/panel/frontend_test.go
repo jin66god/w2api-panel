@@ -1340,3 +1340,19 @@ func TestPanelStaticNoCacheHeaders(t *testing.T) {
 		}
 	}
 }
+
+// 静态资源引用必须带版本查询串：面板常挂在 Cloudflare 等 CDN 后，.js/.css 被边缘缓存
+// 数小时，升级二进制不会让 CDN 回源 —— 「新页面 + 旧 app.js」时新按钮没有事件绑定，
+// 用户侧就是「点了没反应」（1.13.4「收起」按钮的真实反馈）。带版本后 URL 随发版变化，
+// CDN 与浏览器缓存自动失效。
+func TestVersionedIndexAddsAssetVersion(t *testing.T) {
+	out := string(versionedIndex("1.2.3"))
+	for _, want := range []string{`"app.js?v=1.2.3"`, `"mobile.js?v=1.2.3"`, `"mobile.css?v=1.2.3"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("index.html 缺少带版本串的资源引用 %s", want)
+		}
+	}
+	if string(versionedIndex("")) != string(indexHTML) {
+		t.Fatalf("版本为空时必须原样返回 index.html")
+	}
+}

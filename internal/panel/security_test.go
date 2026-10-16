@@ -70,7 +70,9 @@ func TestIndexReferencesExternalScript(t *testing.T) {
 	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/", nil))
 	body := rec.Body.String()
 
-	if !strings.Contains(body, `<script src="app.js"></script>`) {
+	// 资源引用带版本查询串（?v=<版本>，见 index.go versionedIndex），故只断言
+	// 「外部加载 app.js」这一语义，不锁定 URL 是否带查询串。
+	if !strings.Contains(body, `<script src="app.js`) || !strings.Contains(body, `></script>`) {
 		t.Error("index.html must load app.js externally (inline script is blocked by CSP)")
 	}
 	// 反例保护：出现内联 <script>...</script> 内容块即为回归

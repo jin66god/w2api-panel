@@ -11,6 +11,7 @@
 package panel
 
 import (
+	"bytes"
 	_ "embed"
 	"net/http"
 )
@@ -57,11 +58,30 @@ func setSecurityHeaders(w http.ResponseWriter) {
 }
 
 // index 输出面板页面（静态无秘密；数据接口 /panel/api/* 才走鉴权）。
+//
+// 页面里的静态资源引用带版本查询串（?v=<版本>）：面板常挂在 Cloudflare 等 CDN 后，
+// .js / .css 会被边缘缓存数小时（CF 对无缓存头的静态扩展名默认 4h），而**升级二进制
+// 不会让 CDN 回源** —— 结果是「新页面 + 旧 app.js」，新增按钮没有事件绑定，用户侧表现
+// 为「点了完全没反应」（真实反馈：1.13.4 的「收起」按钮，源站已升级、CF 仍 HIT 旧 app.js）。
+// URL 带版本后每次发版 URL 都变，CDN 与浏览器缓存自动失效，无需人工 purge。
 func (p *Panel) index(w http.ResponseWriter, r *http.Request) {
 	setSecurityHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(indexHTML)
+	_, _ = w.Write(versionedIndex(p.cfg.Version))
+}
+
+// versionedIndex 给 index.html 里的 app.js / mobile.js / mobile.css 引用加 ?v=<版本>。
+// 版本为空（未注入）时原样返回。只对 3 个固定资源名做字节替换（微秒级），不做缓存。
+func versionedIndex(version string) []byte {
+	if version == "" {
+		return indexHTML
+	}
+	out := indexHTML
+	for _, asset := range []string{"app.js", "mobile.js", "mobile.css"} {
+		out = bytes.ReplaceAll(out, []byte(`"`+asset+`"`), []byte(`"`+asset+`?v=`+version+`"`))
+	}
+	return out
 }
 
 // appScript 输出前端逻辑（同源脚本，供 CSP script-src 'self' 加载）。

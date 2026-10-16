@@ -204,7 +204,7 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾
 | [PR #190](https://github.com/linguo2625469/workbuddy2api-panel/pull/190) | 会话频道头三件套：`X-Conversation-ID` 缺失时生成请求级兜底（国际版渠道校验要求三个 `X-Conversation-*` 头齐全，缺一即 `400 code=11-128 conversation id missing`） |
 | [PR #159](https://github.com/linguo2625469/workbuddy2api-panel/pull/159) | 剥离 content 里的 `reasoning_text` / `reasoning` 片段（Codex 经 new-api 转换后历史思考片段被透传，上游 content 白名单不含该类型 → `400 code=11101`） |
 | [PR #196](https://github.com/linguo2625469/workbuddy2api-panel/pull/196) | 补偿状态可观测化：官方限时补偿从「签到后盲领」改为「先查后领」+ 截止倒计时 + 面板入口（`GET /panel/api/compensation`、单号/全量领取接口，领取幂等） |
-| [PR #178](https://github.com/linguo2625469/workbuddy2api-panel/pull/178) | 面板账号备注（账号池 / 用量明细 / 积分扣除三表共享备注映射，本机 localStorage）+ 积分到期提醒折叠。1.13.4 修复：折叠状态改内存兜底（禁用站点数据时 localStorage 抛 SecurityError，此前点击会完全无反应）+ 面板静态资源与 API 加 `Cache-Control: no-cache`（防升级后浏览器复用旧 app.js，新按钮无绑定同样表现为「点了没反应」） |
+| [PR #178](https://github.com/linguo2625469/workbuddy2api-panel/pull/178) | 面板账号备注（账号池 / 用量明细 / 积分扣除三表共享备注映射，本机 localStorage）+ 积分到期提醒折叠。1.13.4 修复：折叠状态改内存兜底（禁用站点数据时 localStorage 抛 SecurityError，此前点击会完全无反应）+ 面板静态资源与 API 加 `Cache-Control: no-cache`；1.13.5 起静态资源引用带 `?v=<版本>`（根治 CDN 边缘缓存旧 app.js：升级二进制不会让 Cloudflare 回源，`cf-cache-status: HIT` 返回旧脚本时新按钮无绑定，用户侧就是「点了没反应」） |
 | [PR #143](https://github.com/linguo2625469/workbuddy2api-panel/pull/143) | 面板手机端适配（≤760px 抽屉侧栏 + 宽表卡片化 + 窄屏时序图；独立 `mobile.css` / `mobile.js`，桌面端逐像素不变） |
 
 > 上述五个 PR 合并前逐项做过安全审计：`go.mod` / `go.sum` 未变（无新增依赖）、改动中无外部域名或外发请求（唯一 URL 是测试里的 `fake.example`）、非测试代码无 `exec` / 文件写入、日志不打印凭证；前端保持 `script-src 'self'`（无内联脚本、无外部资源），新增 DOM 拼接全部走 `esc()` 转义。

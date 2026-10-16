@@ -188,6 +188,14 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾
 
 > 上游仓库此后已删除，上述第二轮（`ea8b1e5`）即其**删库前的最后一次更新**，本分支已完整吸收。此后本仓库与上游不再有同步关系，演进以本仓库为准。
 
+**第三轮（`afd6a8f` → `v1.13.2`，2026-10-16，吸收社区 PR + 自研修复）**：
+
+| 来源 | 内容 |
+|---|---|
+| [PR #138](https://github.com/linguo2625469/workbuddy2api-panel/pull/138) | 面板「运行日志」下新增**积分历史**：在余额查询出口挂观察者，每次真实查到余额与上次比对，变动即留痕（`internal/credithist`：原子落盘、重启续接、上限 2000 条、`\|Δ\|>1e6` 视为脏数据只推基线；`GET /panel/api/credit_history`；签到 / 旅行 / 活跃上报 / 保活 / 面板手动刷新全覆盖） |
+| [PR #185](https://github.com/linguo2625469/workbuddy2api-panel/pull/185) | `429 code=6021 queue.full`（渠道级队列满）归类为 `ErrUpstreamBusy`：不罚号、不轮转，末端 `503 + upstream_busy`（见 FAQ「429 code=6021」） |
+| 本仓库自研（issue #169） | **前缀缓存整段未命中修复**：网关此前只注入 `prompt_cache_key`，而 `hy4-preview-f` / `step-5-preview` 这类后端按 **body 的 `conversation_id`** 分前缀缓存槽，客户端不发 `conversation_id` 时同账号所有会话塌进一个槽互相驱逐（实测 hy4 命中 63%、延续态整段未命中 36%，失败后被钉在公共静态头翻转归零）。现于 `InjectPromptCacheKey` 同步补齐 body 级 `conversation_id`（客户端已带 `conversation_id`/`conversationId` 则绝不覆盖，键的会话成分同源），补齐后实测 90%+ |
+
 ## 架构总览
 
 ```mermaid
@@ -863,6 +871,15 @@ python3 scripts/probe_max_tokens.py   --base http://127.0.0.1:7863/v1 --key sk-x
 - **切模型立即可用**：冷却由 6004 触发时会记录触发模型；同一账号改用**其他模型**请求时视为可用。同模型或未记录模型的冷却回到现状
 - **退回指数退避**：6004 无「将在 … 重置」文案，或非 6004 的普通软限流 → 仍是 `soft_rate`（600s 起，连续触发指数退避，封顶 `soft_rate_max`）
 - **面板双口径展示**（issue #171）：上游文案给的恢复时刻晚于网关软冷却上限时，账号行的限流文案同时给出「上游称 … 恢复 · 网关 … 起重试」，倒计时跟随网关实际重试时刻（与实际掉框一致），不再让「解封时间」与实际解锁时刻差出几十分钟到一小时以上
+
+### 429 code=6021（queue.full）会被罚号吗？
+
+不会。`429` + `{"code":6021,"msg":"queue.full.title"}` 是上游**推理集群准入队列满**（渠道级容量信号，不是账号配额），2026-10-15 实案：集群排队时 2 秒内可让同域全部健康号「看起来」在限流。网关的处置：
+
+- **识别为 `upstream_busy`**：`Classify` 在通用 `429` 兜底**之前**判 6021（结构化 code 主判据 + `queue.full` 文案外卡），与 14018 等账号级权威业务码的优先级哲学一致
+- **不罚号**：不冷却、不熔断、不 `NoteError`、不喂连败——账号余额与 session 本就健康
+- **不轮转**：同域换号撞的是同一堵墙（同一渠道），直接 fail-fast 返回 `503 + code=upstream_busy`（透传上游原文含 `requestId`），客户端 SDK 按退避自然重试
+- **为什么必须这样**：旧行为按账号级软限流逐号 `CooldownSoftRate(600s)`，全池冷却后 `pickEarliestExpiryLocked` 兜底又把冷却号送上游、再撞 6021 又续订 600s——两者互相喂导致冷却**永不到期**，一次几秒的上游排队被放大成整段时间每个请求都失败
 
 ### 多图会话请求体超限怎么办？
 

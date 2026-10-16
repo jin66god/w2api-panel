@@ -142,3 +142,93 @@ func TestPrepareBodyOptNoCacheKeyInjection(t *testing.T) {
 		t.Fatalf("PrepareBodyOpt must NOT inject prompt_cache_key, but got: %v", obj["prompt_cache_key"])
 	}
 }
+
+// extractConvID 从改写后的 body 里取出 conversation_id 字段值及其存在性。
+func extractConvID(t *testing.T, body []byte) (string, bool) {
+	t.Helper()
+	var obj map[string]any
+	if err := json.Unmarshal(body, &obj); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	v, ok := obj["conversation_id"].(string)
+	return v, ok
+}
+
+// TestInjectPromptCacheKey_InjectsBodyConversationID 覆盖 issue #169 主用例：
+// 客户端不发 conversation_id（生产形态）→ 网关补齐 body 级 conversation_id，
+// 让按 conversation_id 分前缀缓存槽的后端（hy4-preview-f / step-5-preview 等）
+// 不再把同账号所有会话塌进一个槽互相驱逐（实测整段未命中 0% vs 补齐后 92%）。
+func TestInjectPromptCacheKey_InjectsBodyConversationID(t *testing.T) {
+	in := `{"model":"hy4-preview-f","messages":[]}`
+	out := InjectPromptCacheKey([]byte(in), "user-abc-123", "conv-from-header")
+	conv, ok := extractConvID(t, out)
+	if !ok || conv != "conv-from-header" {
+		t.Fatalf("body conversation_id 未补齐: got=%q present=%v", conv, ok)
+	}
+	if got := extractCacheKey(t, out); got == "" {
+		t.Fatalf("prompt_cache_key 丢失")
+	}
+}
+
+// TestInjectPromptCacheKey_KeepsClientConversationID 客户端已带会话字段时不得覆盖
+// （优先级语义不变），且缓存键的会话成分必须与 body 的 conversation_id 同源。
+func TestInjectPromptCacheKey_KeepsClientConversationID(t *testing.T) {
+	in := `{"model":"hy4-preview-f","messages":[],"conversation_id":"client-conv"}`
+	out := InjectPromptCacheKey([]byte(in), "user-abc-123", "conv-from-header")
+	if conv, _ := extractConvID(t, out); conv != "client-conv" {
+		t.Fatalf("客户端 conversation_id 被覆盖: %q", conv)
+	}
+	keyFromClient := extractCacheKey(t, out)
+	keyFromHeader := extractCacheKey(t, InjectPromptCacheKey(
+		[]byte(`{"model":"hy4-preview-f","messages":[]}`), "user-abc-123", "client-conv"))
+	if keyFromClient != keyFromHeader {
+		t.Fatalf("键与 body conversation_id 不同源: %q vs %q", keyFromClient, keyFromHeader)
+	}
+}
+
+// TestInjectPromptCacheKey_KeepsCamelConversationID 驼峰 conversationId 同样算「已带会话字段」，
+// 不再额外补 snake 字段（避免同一会话出现两个字段）。
+func TestInjectPromptCacheKey_KeepsCamelConversationID(t *testing.T) {
+	in := `{"model":"hy4-preview-f","messages":[],"conversationId":"camel-conv"}`
+	out := InjectPromptCacheKey([]byte(in), "user-abc-123", "conv-from-header")
+	if conv, ok := extractConvID(t, out); ok {
+		t.Fatalf("客户端已带 conversationId 时不应再注入 conversation_id: %q", conv)
+	}
+}
+
+// TestInjectPromptCacheKey_NoConversationSource 两源都空 → 不注入 conversation_id
+// （没有会话可表达），但仍注入账号隔离的 prompt_cache_key。
+func TestInjectPromptCacheKey_NoConversationSource(t *testing.T) {
+	in := `{"model":"hy4-preview-f","messages":[]}`
+	out := InjectPromptCacheKey([]byte(in), "user-abc-123", "")
+	if conv, ok := extractConvID(t, out); ok {
+		t.Fatalf("无会话源时不应注入 conversation_id: %q", conv)
+	}
+	if got := extractCacheKey(t, out); got == "" {
+		t.Fatalf("无会话源时仍应注入 prompt_cache_key")
+	}
+}
+
+// TestInjectPromptCacheKey_ClientKeyAlsoGetsConversationID 客户端自带 prompt_cache_key
+// 但没带会话字段时：键原值保留，同时补齐 conversation_id——否则这类客户端在不认
+// prompt_cache_key 的后端上仍会塌槽（issue #169 的另一半）。
+func TestInjectPromptCacheKey_ClientKeyAlsoGetsConversationID(t *testing.T) {
+	in := `{"model":"hy4-preview-f","messages":[],"prompt_cache_key":"client-set-key"}`
+	out := InjectPromptCacheKey([]byte(in), "user-abc-123", "conv-from-header")
+	if got := extractCacheKey(t, out); got != "client-set-key" {
+		t.Fatalf("客户端 key 被覆盖: %q", got)
+	}
+	if conv, ok := extractConvID(t, out); !ok || conv != "conv-from-header" {
+		t.Fatalf("应补齐 conversation_id: got=%q present=%v", conv, ok)
+	}
+}
+
+// TestInjectPromptCacheKey_ClientKeyAndConvUntouched 客户端 key 与会话字段都齐时
+// 原样返回（不做无谓的重新序列化，保持字节稳定）。
+func TestInjectPromptCacheKey_ClientKeyAndConvUntouched(t *testing.T) {
+	in := `{"model":"hy4-preview-f","messages":[],"prompt_cache_key":"k","conversation_id":"c"}`
+	out := InjectPromptCacheKey([]byte(in), "user-abc-123", "conv-from-header")
+	if string(out) != in {
+		t.Fatalf("两字段齐全时不应改写 body:\n got=%s\nwant=%s", out, in)
+	}
+}

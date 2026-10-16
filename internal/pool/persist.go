@@ -149,9 +149,6 @@ func (p *Pool) applyAccountsLocked(accounts map[string]stateAccount) {
 			creditsEarliestRemaining: s.CreditsEarliestRemaining,
 			disabled:                 s.Disabled,
 			paused:                   s.Paused,
-			reason:                   s.Reason,
-			until:                    s.Until,
-			coolKind:                 s.CoolKind,
 			successCount:             s.SuccessCount,
 			errTotal:                 errTotal,
 			lastErr:                  s.LastErr,
@@ -175,6 +172,16 @@ func (p *Pool) applyAccountsLocked(accounts map[string]stateAccount) {
 		if e.creditsEarliestRemaining == 0 || e.creditsEarliestExpiry.IsZero() || !now.Before(e.creditsEarliestExpiry) {
 			e.creditsEarliestExpiry = time.Time{}
 			e.creditsEarliestRemaining = 0
+		}
+		// 冷却域：过期残留不复活（issue #171 问题一）。旧 state.json 里可能留着已到期的
+		// until/cool_kind/reason（历史 429 文案），无条件恢复会让面板重启后继续展示
+		// 「假冷却」；disabled 号的 reason 是禁用原因（与冷却正交），照常恢复。
+		if s.Disabled {
+			e.reason = s.Reason
+		} else if !s.Until.IsZero() && now.Before(s.Until) {
+			e.until = s.Until
+			e.coolKind = s.CoolKind
+			e.reason = s.Reason
 		}
 		// 熔断器持久化恢复：breakerUntil 未过期才恢复（过期不复活），retryCount 仅在
 		// 熔断仍有效时保留（否则归零，不保留无用退避指数）。
@@ -288,9 +295,6 @@ func (p *Pool) stateOverviewLocked() stateFile {
 			CreditsTotal:             e.creditsTotal,
 			Disabled:                 e.disabled,
 			Paused:                   e.paused,
-			Reason:                   e.reason,
-			Until:                    e.until,
-			CoolKind:                 e.coolKind,
 			SuccessCount:             e.successCount,
 			ErrTotal:                 e.errTotal,
 			LastSuccess:              e.lastSuccess,
@@ -303,6 +307,17 @@ func (p *Pool) stateOverviewLocked() stateFile {
 			CreditsExpiring:          e.creditsExpiring,
 			CreditsEarliestExpiry:    e.creditsEarliestExpiry,
 			CreditsEarliestRemaining: e.creditsEarliestRemaining,
+		}
+		// 冷却域（until/cool_kind/reason）：仅未过期才落盘（issue #171 问题一）。
+		// 过期残留会把历史 429 文案写进 state.json 并在重启后复活成「假冷却」；
+		// disabled 号的 reason 是禁用原因（与冷却正交），照常落盘。
+		if e.disabled {
+			s.Reason = e.reason
+		}
+		if !e.until.IsZero() && now.Before(e.until) {
+			s.Until = e.until
+			s.CoolKind = e.coolKind
+			s.Reason = e.reason
 		}
 		// 熔断截止：仅未过期才落盘（指针 nil 才能被 omitempty 真省略）。
 		if !e.breakerUntil.IsZero() && now.Before(e.breakerUntil) {

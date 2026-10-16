@@ -555,7 +555,6 @@ func (p *Pool) statusOf(uid string, e *entry) Status {
 		CreditsEarliestExpiry:    e.creditsEarliestExpiry,
 		CreditsEarliestRemaining: e.creditsEarliestRemaining,
 		Cooling:                  now.Before(e.until) || now.Before(e.breakerUntil),
-		Reason:                   e.reason,
 		Disabled:                 e.disabled,
 		Paused:                   e.paused,
 		SuccessCount:             e.successCount,
@@ -564,7 +563,6 @@ func (p *Pool) statusOf(uid string, e *entry) Status {
 		TokenUsage:               e.tokenUsage,
 		LastSuccessTime:          e.lastSuccess,
 		LastErrTime:              e.lastErr,
-		Until:                    e.until,
 		SoftStreak:               e.softStreak,
 		ModelCosts:               p.modelCostsStatusLocked(e, now),
 		ConsecutiveFails:         e.consecutiveFails,
@@ -572,6 +570,16 @@ func (p *Pool) statusOf(uid string, e *entry) Status {
 		InFlight:                 int(e.inFlight.Load()),
 		BreakerFails:             e.fails,
 		BreakerUntil:             e.breakerUntil,
+	}
+	// Reason / Until 只在冷却或禁用仍生效时透出（issue #171 问题一）：软冷却到期后
+	// until/cool_kind/reason 三个字段仍留在内存与 state.json 里（只有再次冷却、禁用或
+	// 复活才重写），无条件透出会让面板把「可用」与一周前的 429 rate limit 并排展示，
+	// 运维无法判断它是历史残留还是当前限流。
+	if now.Before(e.until) {
+		st.Until = e.until
+	}
+	if st.Cooling || st.Disabled {
+		st.Reason = e.reason
 	}
 	if st.Disabled {
 		// 禁用账号透出禁用原因（运维看不到为什么死）。

@@ -133,12 +133,28 @@ jobs:
         run: |
           PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
           echo "prev=${PREV}" >> "$GITHUB_OUTPUT"
+      - name: 生成本版变更日志（相对上一 tag 的提交列表）
+        id: notes
+        run: |
+          PREV="${{ steps.prev.outputs.prev }}"
+          {
+            echo "body<<RELEASE_BODY_EOF"
+            echo "CI 自动构建发布（五平台二进制 + checksums）。"
+            echo
+            if [ -n "$PREV" ]; then
+              echo "### 本版变更"
+              echo
+              git log --no-merges --pretty='- %s' "$PREV..$GITHUB_REF_NAME"
+              echo
+              echo "完整变更：https://github.com/${{ github.repository }}/compare/$PREV...$GITHUB_REF_NAME"
+            else
+              echo "完整变更：https://github.com/${{ github.repository }}/releases/tag/$GITHUB_REF_NAME"
+            fi
+            echo "RELEASE_BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}-panel
           prerelease: ${{ contains(github.ref_name, '-') }}
-          body: |
-            CI 自动构建发布（五平台二进制 + checksums）。
-
-            完整变更：https://github.com/${{ github.repository }}/compare/${{ steps.prev.outputs.prev }}...${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.body }}
           files: dist/*

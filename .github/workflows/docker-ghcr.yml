@@ -4,12 +4,17 @@ name: docker-ghcr
 #   - push 到 main / 打 v* tag / 手动触发 → 构建并推送
 #   - PR 触碰构建相关文件 → 仅构建验证，不推送
 # tag 说明：main 推 latest + main + sha-xxxxxx；v1.2.3 推 1.2.3 / 1.2 / 1
+#
+# 架构策略：amd64 与 arm64 分别在**原生 runner** 上并行构建（arm64 用 GitHub 的
+# ubuntu-24.04-arm，public 仓库免费），各自按 digest 推送，再由 merge job 用
+# imagetools 合并成一个多架构 manifest —— 不再用 QEMU 模拟 arm64（那是单次构建
+# 约 5 分钟里的大头），双架构一个不少。merge 后有一道断言：manifest 必须同时含
+# linux/amd64 与 linux/arm64，防将来回归成单架构。
 on:
   push:
     branches: [main]
     # 只在构建相关文件变化时跑（tag push 走同一过滤，但发版必然改
-    # cmd/server/main.go 的 appVersion，故不会被挡住）。纯文档改动不再触发
-    # 双架构 QEMU 构建（单次约 5 分钟）。
+    # cmd/server/main.go 的 appVersion，故不会被挡住）。纯文档改动不再触发镜像构建。
     paths:
       - "Dockerfile"
       - ".dockerignore"
@@ -44,23 +49,32 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  # github.repository 自动小写化，得到 ghcr.io/linguo2625469/workbuddy2api-panel
+  # github.repository 自动小写化，得到 ghcr.io/<owner>/<repo>
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-publish:
-    runs-on: ubuntu-latest
-    # 双架构 QEMU 构建约 5 分钟；给足余量但设上限，防异常挂死吃满 6h 额度。
-    timeout-minutes: 45
+  # 每个平台一个原生 runner 并行构建，按 digest 推送（不打 tag——两个 job 各自打 tag
+  # 会互相覆盖 manifest，tag 统一由 merge job 打）。
+  build:
+    name: build (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm   # GitHub 原生 arm64 runner（public 仓库免费）
+            arch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up QEMU（arm64 交叉模拟）
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -85,15 +99,92 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
 
-      - name: Build and push
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # 非 PR：按 digest 推到 registry（push-by-digest，tag 交给 merge job）；
+          # PR：只构建不导出（cacheonly），仅验证镜像能编出来。
+          outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || format('type=image,name={0}/{1},push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.IMAGE_NAME) }}
+          # 每平台独立 cache scope：两个 runner 并行时不互相覆盖缓存
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
           # 关闭 provenance attestation：避免 ghcr 页面出现 unknown/unknown 架构条目
           provenance: false
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # 汇总两个平台的 digest → 合并成多架构 manifest → 统一打 tag → 断言双架构都在
+  merge:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      # 硬要求：镜像必须同时有 amd64 与 arm64（用户明确要求），这里直接断言防回归
+      - name: 断言 manifest 含 amd64 + arm64
+        run: |
+          OUT=$(docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}")
+          echo "$OUT"
+          for A in amd64 arm64; do
+            if ! grep -q "linux/$A" <<< "$OUT"; then
+              echo "::error::manifest 缺少 linux/$A 架构"
+              exit 1
+            fi
+          done
+          echo "多架构断言 OK: linux/amd64 + linux/arm64"

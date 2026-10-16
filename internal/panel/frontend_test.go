@@ -1124,7 +1124,7 @@ func TestAppJSExpiryFold(t *testing.T) {
 	script := `const fs = require('fs');
 const vm = require('vm');
 const src = fs.readFileSync(process.argv[2], 'utf8');
-const start = src.indexOf('function expFolded(');
+const start = src.indexOf('let expFoldMem');
 const endMarker = 'applyExpFold();';
 const end = src.lastIndexOf(endMarker);
 if (start < 0 || end < 0) throw new Error('expiry fold helpers not found');
@@ -1136,11 +1136,13 @@ function boot(stored) {
     "const LS_EXP_FOLD='wb2api.expfold.v1';" +
     "const store=" + JSON.stringify(stored) + ";" +
     "const pad={hidden:false};" +
+    "const hint={hidden:false};" +
+    "const document={querySelector:function(){return hint;}};" +
     "const btn={textContent:'',attrs:{},setAttribute:function(k,v){this.attrs[k]=v;}};" +
     "function $(id){return id==='expPad'?pad:(id==='btnExpFold'?btn:null);}" +
     "const localStorage={getItem:function(k){return (k in store)?store[k]:null;},setItem:function(k,v){store[k]=v;}};" +
     slice +
-    "\nthis.state=function(){return {hidden:pad.hidden,text:btn.textContent,aria:btn.attrs['aria-expanded'],raw:store['wb2api.expfold.v1']||null};};" +
+    "\nthis.state=function(){return {hidden:pad.hidden,hintHidden:hint.hidden,text:btn.textContent,aria:btn.attrs['aria-expanded'],raw:store['wb2api.expfold.v1']||null};};" +
     "\nthis.click=function(){btn.onclick();};",
     ctx
   );
@@ -1166,7 +1168,7 @@ process.stdout.write(JSON.stringify({fresh: fresh, folded: folded, unfolded: unf
 	if err != nil {
 		t.Fatalf("expiry fold node test failed: %v\n%s", err, out)
 	}
-	const want = `{"fresh":{"hidden":false,"text":"收起","aria":"true","raw":null},"folded":{"hidden":true,"text":"展开","aria":"false","raw":"1"},"unfolded":{"hidden":false,"text":"收起","aria":"true","raw":"0"},"restored":{"hidden":true,"text":"展开","aria":"false","raw":"1"}}`
+	const want = `{"fresh":{"hidden":false,"hintHidden":false,"text":"收起","aria":"true","raw":null},"folded":{"hidden":true,"hintHidden":true,"text":"展开","aria":"false","raw":"1"},"unfolded":{"hidden":false,"hintHidden":false,"text":"收起","aria":"true","raw":"0"},"restored":{"hidden":true,"hintHidden":true,"text":"展开","aria":"false","raw":"1"}}`
 	if strings.TrimSpace(string(out)) != want {
 		t.Fatalf("expiry fold=%s\nwant %s", strings.TrimSpace(string(out)), want)
 	}
@@ -1271,5 +1273,70 @@ process.stdout.write(JSON.stringify({
 	if strings.TrimSpace(string(out)) != want {
 		t.Fatalf("mobile chart tooltip structure=%s\nwant %s（groups 应等于数据点数，loose 应为 0）",
 			strings.TrimSpace(string(out)), want)
+	}
+}
+
+// 存储不可用（隐私模式 / 禁用站点数据）时 localStorage 访问会抛 SecurityError。
+// 回归锚点：此前 expFolded() 裸调 getItem，抛错直接中断点击处理器——用户侧表现为
+// 「点『收起』完全没有任何反应」（真实反馈）。修复后点击必须仍然折叠并给出反馈。
+func TestAppJSExpiryFoldStorageDenied(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; expiry fold storage test skipped")
+	}
+	script := `const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[2], 'utf8');
+const start = src.indexOf('let expFoldMem');
+const endMarker = 'applyExpFold();';
+const end = src.lastIndexOf(endMarker);
+const slice = src.slice(start, end + endMarker.length);
+const ctx = {};
+vm.createContext(ctx);
+vm.runInContext(
+  "const LS_EXP_FOLD='wb2api.expfold.v1';" +
+  "const pad={hidden:false};" +
+  "const hint={hidden:false};" +
+  "const document={querySelector:function(){return hint;}};" +
+  "const btn={textContent:'',attrs:{},setAttribute:function(k,v){this.attrs[k]=v;}};" +
+  "function $(id){return id==='expPad'?pad:(id==='btnExpFold'?btn:null);}" +
+  "const localStorage={getItem:function(){throw new Error('SecurityError');},setItem:function(){throw new Error('SecurityError');}};" +
+  slice +
+  "\nthis.click=function(){btn.onclick();};" +
+  "\nthis.state=function(){return {hidden:pad.hidden,hintHidden:hint.hidden,text:btn.textContent};};",
+  ctx
+);
+const before = ctx.state();
+ctx.click();
+const after = ctx.state();
+process.stdout.write(JSON.stringify({before: before, after: after}));`
+	f, err := os.CreateTemp(t.TempDir(), "expiry-fold-storage-*.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	if err != nil {
+		t.Fatalf("expiry fold (storage denied) node test failed: %v\n%s", err, out)
+	}
+	const want = `{"before":{"hidden":false,"hintHidden":false,"text":"收起"},"after":{"hidden":true,"hintHidden":true,"text":"展开"}}`
+	if strings.TrimSpace(string(out)) != want {
+		t.Fatalf("storage-denied fold=%s\nwant %s（存储不可用时点击也必须折叠，不得无反应）", strings.TrimSpace(string(out)), want)
+	}
+}
+
+// 静态资源与 API 必须带 no-cache：前端随二进制发布，浏览器若复用旧 app.js，
+// 新页面里的按钮就没有事件绑定（「点收起没反应」的另一种成因）。
+func TestPanelStaticNoCacheHeaders(t *testing.T) {
+	p := newTestPanel()
+	for _, path := range []string{"/panel/", "/panel/app.js", "/panel/mobile.css", "/panel/mobile.js"} {
+		rec := httptest.NewRecorder()
+		p.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "no-cache") {
+			t.Fatalf("%s Cache-Control=%q，应含 no-cache（防升级后浏览器复用旧 app.js）", path, got)
+		}
 	}
 }

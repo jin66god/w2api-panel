@@ -3279,19 +3279,37 @@ if ($('btnRemarkSave')) $('btnRemarkSave').onclick = saveRemarkForm;
 /* ══ 首页「积分到期提醒」折叠（选择记在本机，默认展开）═════════════════════
    展开态是原行为：点「检查」就要能立刻看到结果，所以默认不折叠；用户收起一次后
    由 localStorage 记住。折叠只作用于列表容器，卡片标题与「检查」按钮始终可见。 */
-function expFolded() { return localStorage.getItem(LS_EXP_FOLD) === '1'; }
+// 存储不可用（隐私模式 / 禁用站点数据）时 localStorage 读写都会抛 SecurityError。
+// 只兜住异常还不够——折叠状态本就存在 localStorage 里，读写都失败会导致点击后状态
+// 不翻转，用户侧依然表现为「点『收起』完全没有任何反应」（真实反馈）。故加一层内存
+// 兜底：本次会话内折叠照常工作，只是刷新后不记忆（远好于点了没反应）。
+let expFoldMem = null;
+function expFolded() {
+  if (expFoldMem !== null) return expFoldMem;
+  try { return localStorage.getItem(LS_EXP_FOLD) === '1'; } catch (e) { return false; }
+}
+function setExpFolded(v) {
+  expFoldMem = v;
+  try { localStorage.setItem(LS_EXP_FOLD, v ? '1' : '0'); } catch (e) {}
+}
 function applyExpFold() {
   const pad = $('expPad'), btn = $('btnExpFold');
   if (!pad || !btn) return;
   const folded = expFolded();
   pad.hidden = folded;
+  // 折叠时把标题里的说明文字一并收起：只藏列表时卡片高度几乎不变、说明还在，
+  // 用户会以为「点了没反应」。保留标题与两个按钮，才能再展开回来。
+  const hint = document.querySelector('#expBox header h3 .hint');
+  if (hint) hint.hidden = folded;
   btn.textContent = folded ? '展开' : '收起';
   btn.setAttribute('aria-expanded', folded ? 'false' : 'true');
 }
 if ($('btnExpFold')) {
   $('btnExpFold').onclick = () => {
-    try { localStorage.setItem(LS_EXP_FOLD, expFolded() ? '0' : '1'); } catch (e) {}
-    applyExpFold();
+    // 任何一步失败都不能让点击「无反应」：状态翻转走 setExpFolded（含内存兜底），
+    // 渲染单独兜。
+    setExpFolded(!expFolded());
+    try { applyExpFold(); } catch (e) {}
   };
 }
 applyExpFold();

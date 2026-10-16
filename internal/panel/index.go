@@ -44,6 +44,10 @@ const csp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inl
 
 // setSecurityHeaders 写入面板统一安全响应头（页面与 API 都要，API 也含 JSON 数据）。
 func setSecurityHeaders(w http.ResponseWriter) {
+	// 前端资源随二进制发布：必须禁缓存（no-cache = 每次使用前回源校验），否则升级后
+	// 浏览器可能仍用旧 app.js —— 新页面配旧脚本，新增按钮没有事件绑定，表现为
+	// 「点『收起』完全没反应」（真实反馈）。API 同样禁缓存，避免中间层缓存账号数据。
+	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 	w.Header().Set("Content-Security-Policy", csp)
 	w.Header().Set("X-Content-Type-Options", "nosniff") // 禁 MIME 嗅探
 	w.Header().Set("X-Frame-Options", "DENY")           // 老浏览器兜底（CSP frame-ancestors 的等价项）

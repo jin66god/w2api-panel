@@ -249,7 +249,10 @@ function rateLimitMeta(row, now) {
   const kind = String(row && row.kind || 'rate_limit');
   const resetAt = parseAPITime(row && row.reset_at);
   const until = parseAPITime(row && row.until);
-  const deadline = resetAt || until;
+  // 倒计时口径跟随网关实际重试时刻（until），不是上游文案宣称的恢复时刻（reset_at）：
+  // 6004 的 reset_at 可能远晚于网关软冷却上限（until = min(resetAt, now + 上限)），
+  // 两者混用会让面板「剩余」与实际掉框时刻脱节（issue #171 问题二）。
+  const deadline = until || resetAt;
   const remaining = deadline > now ? Math.round((deadline - now) / 1000) : 0;
   if (kind === 'model_unavailable') {
     return {
@@ -259,12 +262,22 @@ function rateLimitMeta(row, now) {
       title: model + '\n模型当前不可用' + (deadline ? '\n最早重试：' + fmtLocalDateTime(deadline) : ''),
     };
   }
-  let detail = resetAt
-    ? '预计 ' + fmtLocalDateTime(resetAt) + ' 解封' + (remaining ? '（剩余 ' + dur(remaining) + '）' : '')
-    : (until ? '预计 ' + fmtLocalDateTime(until) + ' 恢复（剩余 ' + dur(remaining) + '）' : '预计解封时间未知');
+  // 双口径明示（issue #171 问题二）：until < resetAt 时上游文案给的恢复时刻远晚于
+  // 网关软冷却上限，只显示 resetAt 会让「解封时间」与实际掉框时刻差出几十分钟到
+  // 一小时以上。此时主文字同时给出两个时刻，倒计时跟随 until（与实际重试一致）。
+  let detail;
+  if (resetAt && until && until < resetAt) {
+    detail = '上游称 ' + fmtLocalDateTime(resetAt) + ' 恢复 · 网关 ' + fmtLocalDateTime(until) + ' 起重试' +
+      (remaining ? '（剩余 ' + dur(remaining) + '）' : '');
+  } else if (resetAt) {
+    detail = '预计 ' + fmtLocalDateTime(resetAt) + ' 解封' + (remaining ? '（剩余 ' + dur(remaining) + '）' : '');
+  } else if (until) {
+    detail = '预计 ' + fmtLocalDateTime(until) + ' 恢复' + (remaining ? '（剩余 ' + dur(remaining) + '）' : '');
+  } else {
+    detail = '预计解封时间未知';
+  }
   const title = [model, resetAt ? '上游重置：' + fmtLocalDateTime(resetAt) : '上游重置：时间未知'];
   if (until && resetAt && until < resetAt) {
-    detail += ' · 网关最快 ' + dur(Math.max(0, Math.round((until - now) / 1000))) + ' 后重试';
     title.push('网关最早重试：' + fmtLocalDateTime(until));
   }
   return { model, kind, detail, title: title.join('\n') };
@@ -388,7 +401,11 @@ function renderAccounts(list) {
         : (dg > (s.cool_remaining_sec || 0) ? '连败降权' : (s.cool_kind === 'hard_credit' ? '积分冷却' : '限流冷却'));
       tag = '<span class="tag warn">' + kind + ' · ' + dur(cool) + '</span>';
     } else tag = '<span class="tag ok">可用</span>' + (s.in_flight ? '' : '');
-    const note = s.reason ? '<div class="hint" style="font-size:11.5px;color:var(--ink-3);margin-top:3px">' + esc(s.reason) + '</div>' : '';
+    // reason 只在冷却/禁用仍生效时展示（issue #171 问题一）：服务端已按同一口径归一，
+    // 这里再兜一层，避免旧后端/缓存数据把过期冷却文案挂在「可用」旁。
+    const note = (s.cooling || s.disabled) && s.reason
+      ? '<div class="hint" style="font-size:11.5px;color:var(--ink-3);margin-top:3px">' + esc(s.reason) + '</div>'
+      : '';
     const rateLimits = rateLimitRowsHtml(s.rate_limited_models, Date.now());
     const short = s.uid.length > 16 ? s.uid.slice(0, 16) + '…' : s.uid;
     // 企业版不限量：上游 limitNum == -1，网关以 credits_total=-1 透出（见 upstream

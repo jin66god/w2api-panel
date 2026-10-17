@@ -1235,9 +1235,9 @@ func (p *Panel) runAutoAll(a *auth.Auth) []map[string]any {
 		item["progress_after"] = taskProgressText(after)
 		// 进度达标即自动领奖（mp 任务走 chat 域 mp 口径，其余 Web 端接口）。
 		// 领奖失败不掩盖主流程结果：status 仍为 done，附加 claim_error 供前端提示。
-	if after != nil && after.Claimable {
-		item["claimable"] = true
-		credit, energy, cerr := claimTaskReward(p, a, act.TaskCode)
+		if after != nil && after.Claimable {
+			item["claimable"] = true
+			credit, energy, cerr := claimTaskReward(p, a, act.TaskCode)
 			if cerr == nil {
 				item["claimed"] = true
 				item["credit"] = credit

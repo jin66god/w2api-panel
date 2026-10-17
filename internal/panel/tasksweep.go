@@ -162,14 +162,8 @@ func (p *Panel) sweepAccount(a *auth.Auth, uid string) (res sweepResult) {
 			continue
 		}
 		// mp 口径任务必须走 mp 变体领奖端点（缺 mp 头上游返回 task not found）；
-		// 其余走 Web 域端点——与 taskcenter / autotask 的领奖口径一致。
-		var c, e int64
-		var cErr error
-		if isMPTaskCode(t.TaskCode) || mpOnly[t.TaskCode] {
-			c, e, cErr = p.cfg.Upstream.ClaimRewardMP(a, t.TaskCode)
-		} else {
-			c, e, cErr = p.cfg.Upstream.ClaimReward(a, t.TaskCode)
-		}
+		// 其余走 Web 域端点——与 taskcenter / autotask 共用 claimTaskReward 口径。
+		c, e, cErr := claimTaskReward(p, a, t.TaskCode, mpOnly[t.TaskCode])
 		if cErr != nil {
 			res.errors++
 			continue

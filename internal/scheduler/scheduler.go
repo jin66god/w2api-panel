@@ -702,6 +702,9 @@ func (s *Scheduler) StartTaskSweep(ctx context.Context, interval time.Duration) 
 	}
 	s.sweepInterval.Store(int64(interval))
 	go func() {
+		// 启动即跑一轮：升级/重启后立刻补领，不必等满一个间隔。清扫幂等
+		//（accept/claim 重复调用无副作用），首轮与后续 ticker 共用同一 hook。
+		s.runTaskSweepHook()
 		var logged time.Duration
 		for {
 			cur := time.Duration(s.sweepInterval.Load())
@@ -726,12 +729,7 @@ func (s *Scheduler) StartTaskSweep(ctx context.Context, interval time.Duration) 
 			case <-s.rearmSweep:
 				timer.Stop() // 间隔已变：立刻按新值重算
 			case <-timer.C:
-				s.schedMu.Lock()
-				hook := s.cfg.TaskSweepHook
-				s.schedMu.Unlock()
-				if hook != nil {
-					hook()
-				}
+				s.runTaskSweepHook()
 			}
 		}
 	}()
@@ -739,6 +737,12 @@ func (s *Scheduler) StartTaskSweep(ctx context.Context, interval time.Duration) 
 
 // RunTaskSweepNow 立刻跑一轮任务补领清扫（手动触发/测试用）。
 func (s *Scheduler) RunTaskSweepNow() {
+	s.runTaskSweepHook()
+}
+
+// runTaskSweepHook 取当前 hook 并执行；hook 为 nil（panel 尚未接线）时跳过。
+// 启动首轮、ticker 每轮与手动触发共用同一入口，避免三处各写一遍加锁逻辑。
+func (s *Scheduler) runTaskSweepHook() {
 	s.schedMu.Lock()
 	hook := s.cfg.TaskSweepHook
 	s.schedMu.Unlock()

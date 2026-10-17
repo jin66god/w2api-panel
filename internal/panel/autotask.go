@@ -216,9 +216,11 @@ var mpTaskCodes = map[string]bool{
 func isMPTaskCode(code string) bool { return mpTaskCodes[code] }
 
 // claimTaskReward 按任务码口径领奖：mp 码走 chat 域 mp 端点，其余走 Web 端。
-// claim 幂等（重复领返回 already_claimed → 0 分 0 能）。
-func claimTaskReward(p *Panel, a *auth.Auth, code string) (credit, energy int64, err error) {
-	if isMPTaskCode(code) {
+// mpOnly 标注「只在 mp 列表下发、不在默认列表」的任务——它们不在 isMPTaskCode
+// 白名单里，单靠白名单会误走 Web 端点（上游返回 task not found）。claim 幂等
+// （重复领返回 already_claimed → 0 分 0 能）。
+func claimTaskReward(p *Panel, a *auth.Auth, code string, mpOnly bool) (credit, energy int64, err error) {
+	if mpOnly || isMPTaskCode(code) {
 		return p.cfg.Upstream.ClaimRewardMP(a, code)
 	}
 	return p.cfg.Upstream.ClaimReward(a, code)
@@ -1199,7 +1201,7 @@ func (p *Panel) runAutoAll(a *auth.Auth) []map[string]any {
 			// 依赖 accept_status=="completed"（回读会短暂转 completed 后回滚，
 			// 据此领奖会误领）。
 			if !before.Claimed {
-				credit, energy, cerr := claimTaskReward(p, a, act.TaskCode)
+				credit, energy, cerr := claimTaskReward(p, a, act.TaskCode, false)
 				switch {
 				case cerr != nil:
 					item["claim_error"] = cerr.Error()
@@ -1237,7 +1239,7 @@ func (p *Panel) runAutoAll(a *auth.Auth) []map[string]any {
 		// 领奖失败不掩盖主流程结果：status 仍为 done，附加 claim_error 供前端提示。
 		if after != nil && after.Claimable {
 			item["claimable"] = true
-			credit, energy, cerr := claimTaskReward(p, a, act.TaskCode)
+			credit, energy, cerr := claimTaskReward(p, a, act.TaskCode, false)
 			if cerr == nil {
 				item["claimed"] = true
 				item["credit"] = credit

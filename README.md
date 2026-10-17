@@ -209,6 +209,17 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾
 
 > 上述五个 PR 合并前逐项做过安全审计：`go.mod` / `go.sum` 未变（无新增依赖）、改动中无外部域名或外发请求（唯一 URL 是测试里的 `fake.example`）、非测试代码无 `exec` / 文件写入、日志不打印凭证；前端保持 `script-src 'self'`（无内联脚本、无外部资源），新增 DOM 拼接全部走 `esc()` 转义。
 
+**第五轮（`b7d0a8a` → `v1.13.6`，2026-10-17，吸收社区 PR + 自研完善）**：
+
+| 来源 | 内容 |
+|---|---|
+| [PR #198](https://github.com/linguo2625469/workbuddy2api-panel/pull/198) | `400 code=11-128 request illegal`（渠道校验拦截，上游 displayTips 明示「请重新发送」）不再永久禁用账号：历史实现直接 `Disable`，把仍可用的国际版账号永久踢出池子、必须人工解冻；现改为账号级软冷却 + 自动轮换，到期自愈（issue #197）。合并时补了 2 条回归测试（request illegal / 14017 均不得 Disabled） |
+| [PR #199](https://github.com/linguo2625469/workbuddy2api-panel/pull/199) | 缓存告警假阳性修复（issue #170）：上游回 `hit=0 + miss=3 + prompt=52703` 时按 `prompt - miss` 对称反推命中量，流式 / 非流式口径统一；`prompt <= miss` 保持 0（真实整段未命中，不误伤） |
+| [PR #204](https://github.com/linguo2625469/workbuddy2api-panel/pull/204) | 「一键完成」遇到「进度已达标但未领奖」先幂等补领再标记跳过，修「真实对话点亮的任务没人领奖、积分卡在半路」（issue #174 顺带项） |
+| [PR #205](https://github.com/linguo2625469/workbuddy2api-panel/pull/205) | 新增周期「任务补领清扫」（issue #174 主体）：每 15 分钟（`schedule.task_sweep_enabled` / `task_sweep_minutes`，可关）扫描全部账号，accept 未接受 + claim 已达标未领，只发幂等请求、不跑任何行为链路；**启动即跑首轮**；per-account 锁跳过忙碌账号；global / 企业版零上游请求。合并时把 claim 逻辑与 #204 统一为 `claimTaskReward(mpOnly)` |
+
+> 第五轮同样做了安全审计：新增行无外部域名 / 外发请求，非测试代码无 `exec` / 文件写入 / `base64` / `eval`，`go.mod` / `go.sum` 无变化；新增上游请求全部复用既有鉴权头与官方域名。
+
 ## 架构总览
 
 ```mermaid

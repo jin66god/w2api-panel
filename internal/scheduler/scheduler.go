@@ -466,7 +466,10 @@ func (s *Scheduler) RunCheckinNow() {
 			continue
 		}
 		a := s.cfg.Pool.AuthByUID(st.UID)
-		if a == nil || a.RefreshTokenValue() == "" {
+		// 无 refresh token 的账号默认跳过（保号以刷新为前提）；但静态 API Key 例外——
+		// 它没有 refresh token 也不需要刷新，下方余额刷新（企业口径）是 credit_floor
+		// 与面板额度的唯一数据源，必须照跑。带 access token 的 JWT 账号保持现状跳过。
+		if a == nil || (a.RefreshTokenValue() == "" && !a.IsAPIKey()) {
 			continue
 		}
 		// D4 门控：realm=global 账号无签到体系，直接跳过（不发起任何上游调用，避免风控）。
@@ -475,11 +478,13 @@ func (s *Scheduler) RunCheckinNow() {
 		if a.IsGlobal() {
 			continue
 		}
-		// 企业版无签到体系：上游对 POST /v2/billing/meter/daily-checkin 直接
-		// 400 code 10001「企业账号不支持该操作」。跳过签到，但**不 continue**——
+		// 企业版与静态 API Key 账号均无签到体系（企业版上游 400 code 10001「企业账号
+		// 不支持该操作」；API Key 无个人账号身份）：跳过签到，但**不 continue**——
 		// 下方余额查询照常跑（企业额度走 get-enterprise-user-usage 口径，且是
 		// credit_floor 判定与面板额度展示的唯一数据源）。
-		if !a.IsEnterprise() {
+		// 企业切换会话**不**跳过：签到对该形态实测正常，静默失效只发生在 /v2/report
+		// 类行为事件（issue #162），故用 SupportsPersonalEndpoints 而非执行类门控。
+		if a.SupportsPersonalEndpoints() {
 			if err := s.cfg.Upstream.DailyCheckin(a); err != nil {
 				// "今天已签到"是幂等成功（上游对重复签到返回 code!=0），不再当失败打 error 行。
 				if upstream.IsAlreadyCheckin(err) {
@@ -533,13 +538,11 @@ func (s *Scheduler) runActivity(ctx context.Context) {
 		if a == nil || a.AccessTokenValue() == "" {
 			continue
 		}
-		// 企业版跳过活跃上报：/v2/report 本身返回 200（不报错），但它唯一的作用是
-		// 点亮 growth 连登天数 / 解锁 first_buddy 领养——这两者对企业号都是 403
-		// （「growth system is only available for personal users」），即**零收益**。
-		// 该类"静默无效"最易被忽略（日志无异常），故显式跳过，不给上游多发一次请求。
-		// 企业切换会话（token_source=enterprise_switch）同跳：report 返回 200 却被
-		// 上游静默丢弃（连登不涨），同样是零收益（见 auth.IsEnterpriseSession）。
-		if a.IsEnterpriseSession() {
+		// 企业版 / 企业切换会话 / 静态 API Key 均无个人成长体系：/v2/report 本身返回 200
+		// （不报错），但它唯一的作用是点亮 growth 连登天数 / 解锁 first_buddy 领养——
+		// 这几类账号都是 403 或被静默丢弃，即**零收益**。该类"静默无效"最易被忽略
+		// （日志无异常），故显式跳过，不给上游多发一次请求。
+		if !a.SupportsPersonalGrowth() {
 			continue
 		}
 		// global 账号同样上报（PR #45 实测国际版 /v2/report 在 workbuddy.ai 上 code=0 OK，

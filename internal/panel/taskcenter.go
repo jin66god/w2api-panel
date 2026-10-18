@@ -77,9 +77,11 @@ func (p *Panel) tasksScanAll(w http.ResponseWriter, r *http.Request) {
 			if a.IsGlobal() {
 				return
 			}
-			// 企业版门控：同上——企业版无个人成长体系（GET /v2/activity/growth/tasks
-			// 上游 403「growth system is only available for personal users」）。
-			if a.IsEnterprise() {
+			// 企业版与静态 API Key 账号门控：二者无个人成长体系
+			// （GET /v2/activity/growth/tasks 上游 403「growth system is only available
+			// for personal users」）。企业切换会话仍可读列表（issue #162 实测 200 且完整），
+			// 故用 SupportsPersonalEndpoints，避免过度门控隐藏任务。
+			if !a.SupportsPersonalEndpoints() {
 				return
 			}
 			if tasks, err := p.cfg.Upstream.ListTasks(a); err != nil {
@@ -222,16 +224,11 @@ func (p *Panel) startGrowthQueue(concurrency int, growth bool) (started bool, to
 			if a.IsGlobal() {
 				return
 			}
-			// 企业版门控：同上（企业版无个人成长体系，任务端点上游一律 403）。
-			// 企业切换会话（token_source=enterprise_switch）同跳：任务列表读得到，
-			// 但执行后行为事件被上游静默丢弃（200 不计分）——每项都是零收益白跑
-			// （含 expert_5 等真实对话配额），故不入队并给出重登指引（见
-			// auth.IsEnterpriseSession）。
-			if a.IsEnterprise() {
-				return
-			}
-			if a.IsEnterpriseSession() {
-				log.Printf("panel: WARN 队列跳过 uid=%s nickname=%q：凭证为企业切换会话（token_source=enterprise_switch），成长任务行为事件会被上游静默丢弃；请移除该账号，在浏览器退出企业切换（个人身份）后重新登录", a.UID, a.Nickname)
+			// 无个人成长体系账号门控（企业版 / 企业切换会话 / 静态 API Key）：
+			// 行为事件会被上游静默丢弃或直接 403，入队只会白耗真实对话配额，
+			// 故不入队并记录可定位的跳过原因（见 auth.SupportsPersonalGrowth）。
+			if !a.SupportsPersonalGrowth() {
+				log.Printf("panel: WARN 队列跳过 uid=%s nickname=%q：账号无个人成长体系（企业版/企业切换会话/静态 API Key），成长任务行为事件会被上游忽略", a.UID, a.Nickname)
 				return
 			}
 			if growth {

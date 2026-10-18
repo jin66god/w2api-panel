@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>把腾讯 CodeBuddy 账号变成 OpenAI 兼容 API 的多账号网关 · 附 Web 管理面板</b><br>
-  Web 面板 · OAuth 浏览器登录 · 账号池轮转 · 熔断与冷却 · 会话粘性 · 定时签到 / 活跃 / 旅行 / 保活 · <b>成长任务一键完成（17/18）</b> · 流式 / 非流式
+  Web 面板 · OAuth / <b>静态 API Key</b> 双登录 · 账号池轮转 · 熔断与冷却 · 会话粘性 · 定时签到 / 活跃 / 旅行 / 保活 · <b>成长任务一键完成（17/18）</b> · <b>联网搜索端点</b> · 流式 / 非流式
 </p>
 
 <p align="center">
@@ -163,6 +163,9 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾
 | **在线配置编辑（热生效）** | 面板直接改 `config.json`：API 密钥 / `soft_rate` / 脱敏开关 / 池参数 / 任务排程**立即生效**；装配期字段（listen 等）保存后提示需重启。写入采用深合并 + 原子替换，保留未知键 |
 | **积分任务体系** | 任务列表 / 接受 / 领取接口 + 面板弹窗；「一键完成」覆盖 **17 个任务**（对话 / 领养 / 桌面行为链 / 模板 / 灵感案例 / 画布 / 专家召唤 / 技能尝鲜 / 主题 / 资料库 / 夜猫子等），推进进度、等待异步计分落定后**自动领奖**，纯 API 零客户端依赖 |
 | **限时补偿可观测（issue #189）** | 官方补偿（例：「模型服务异常额外补偿 500 积分」）在账号侧可见，网关改为**先查 `compensation-status` 再决定是否领**：面板「官方补偿」卡片列出待领账号 + 领取截止倒计时（≤48h 标红）+ 逐号/全量领取按钮；**查询失败的账号在卡片上显形为红色行，不会与「没有补偿」混为一谈**；每日签到排程同步走「查→领」，**状态查询失败与领取失败一律显式告警**（旧实现把「没有 / 已领 / 领取失败」三态压成同一形态，带截止日的补偿会静默过期） |
+| **静态 API Key 账号（ck_/pt_）** | 面板「添加账号 → API Key」直接粘贴 CodeBuddy 控制台签发的静态 Key，无需浏览器 OAuth；落盘与 OAuth 账号同形、热加载进池；`NeedsRefresh()` 恒 false（不会因"刷新失败"把好号冷却），额度走企业口径端点，成长类任务排程与面板入口自动隐藏 |
+| **联网搜索 `POST /v1/search/messages`** | 把上游 `/agenttool/v1/search` 包成 Anthropic Messages 兼容形态，DSH 等客户端的搜索 provider 零改动接入；共享账号池的选号 / 在途租约 / token 刷新 / 错误冷却 |
+| **出站 DNS 可指定** | `dns_servers` / `WB2A_DNS` 显式指定出站解析器；Android / magisk / 精简容器没有 `/etc/resolv.conf` 时，Go 解析器会退回 `127.0.0.1:53` 导致全部域名解析失败，此项可直接绕开 |
 | **首启自动生成配置** | 目录下无 `config.json` 时自动生成推荐配置（含 `crypto/rand` 随机 `api_key`），双击即开 |
 | **粘性会话内容回退** | 客户端不发 `conversation_id` 时，用 `system + 首条 user` 哈希派生会话键（`d-` 前缀），通用 OpenAI 客户端也能享受粘性 |
 | **余额后台刷新** | `schedule.balance_refresh_minutes`（默认 5）周期查余额并更新池，冷却账号余额恢复自动解冻 |
@@ -220,6 +223,20 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾
 | [PR #205](https://github.com/linguo2625469/workbuddy2api-panel/pull/205) | 新增周期「任务补领清扫」（issue #174 主体）：每 15 分钟（`schedule.task_sweep_enabled` / `task_sweep_minutes`，可关）扫描全部账号，accept 未接受 + claim 已达标未领，只发幂等请求、不跑任何行为链路；**启动即跑首轮**；per-account 锁跳过忙碌账号；global / 企业版零上游请求。合并时把 claim 逻辑与 #204 统一为 `claimTaskReward(mpOnly)` |
 
 > 第五轮同样做了安全审计：新增行无外部域名 / 外发请求，非测试代码无 `exec` / 文件写入 / `base64` / `eval`，`go.mod` / `go.sum` 无变化；新增上游请求全部复用既有鉴权头与官方域名。
+
+**第六轮（`78471ed` → `v1.14.0`，2026-10-18，吸收社区 PR #144/#162/#193/#213/#217）**：
+
+| 来源 | 内容 |
+|---|---|
+| [PR #217](https://github.com/linguo2625469/workbuddy2api-panel/pull/217) | **同账号 refresh 单飞**（issue #215）：同一 UID 同一时刻只允许一个 refresh 在途，其余调用等待并复用首个结果。上游对 refreshToken 反重放，并发第二发会带已消费的 RT 撞 `12153` 并把整条 RT 链作废（账号从此恒 401、只能人工重登）。附带跨进程兜底：撞 12153 后读回磁盘 auth 文件，若已被另一进程（server + signin 双进程部署）rotate 则采纳并重试一次 |
+| [PR #162](https://github.com/linguo2625469/workbuddy2api-panel/pull/162) | **企业切换会话识别与门控**（`token_source=enterprise_switch`）：该形态下 `/v2/report` 行为事件返回 200 却被上游静默丢弃（15 个成长任务全部 0/x、90s 内进度不跳动），旧实现在白耗真实对话配额且无任何报错。现解析 JWT 声明识别该形态，活跃上报 / 连登 / 旅行 / 夜猫子直接跳过；**签到与任务列表不门控**（实测正常，失败是显式报错），登录时打印可定位的 WARN 与重登指引 |
+| [PR #193](https://github.com/linguo2625469/workbuddy2api-panel/pull/193) | **静态 API Key 账号**（`ck_` / `pt_`）：新增 `POST /panel/api/accounts/add_apikey`（`withAuth`），先用企业额度端点探测有效再落盘；出站按官方 CLI 双头 `Authorization` + `X-API-Key`；`IsAPIKey()` / `NeedsRefresh()` / `UsesEnterpriseBilling()` 分流，签到与成长类排程零上游请求，单账号任务接口返回 `422` 并附说明 |
+| [PR #213](https://github.com/linguo2625469/workbuddy2api-panel/pull/213) | **联网搜索端点** `POST /v1/search/messages`：上游 `/agenttool/v1/search` 的 Anthropic Messages 兼容封装，复用账号池与请求日志记账；含完整测试（含未声明 `web_search` 工具时的拒绝路径） |
+| [PR #144](https://github.com/linguo2625469/workbuddy2api-panel/pull/144) | **出站 DNS 可指定**：`dns_servers` / `WB2A_DNS` 只替换 `Transport.DialContext`（不动超时与连接池），多台按序尝试；修复 Android / 精简容器无 `/etc/resolv.conf` 时解析全落 `[::1]:53` 的问题 |
+
+> 本轮合并统一了一处**门控语义分叉**：#162 要求「企业切换会话签到照常」，#193 要求「静态 Key 无任何个人端点」，两者都改同一批调度入口。为避免过度门控，`auth` 拆成两层：`SupportsPersonalGrowth()`（行为类任务，含企业切换会话）与 `SupportsPersonalEndpoints()`（签到 / 任务列表，仅挡企业版与静态 Key）。合并后全量 `go build` / `go vet` / `go test ./...` 通过（16 个测试包）。
+
+> 安全审计：`go.mod` / `go.sum` 无变化；新增行无外部域名或外发请求（仅文档示例 URL）；非测试代码无 `exec` / 裸文件写入（唯一写盘是用户主动触发的 API Key 落盘，0600 + 原子写）；新增面板接口全部包 `withAuth`；前端保持 `script-src 'self'`。
 
 ## 架构总览
 

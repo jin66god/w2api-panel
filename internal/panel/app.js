@@ -392,7 +392,7 @@ function renderAccounts(list) {
   }
   // 有总额度（credits_total）→ 进度条按自身 剩余/总额 百分比；旧数据无总额 → 退回池内最高=100%
   const maxCred = Math.max(1, ...list.map(s => s.credits || 0));
-  tb.innerHTML = list.map(s => {
+  const rowHTML = (s) => {
     const bl = (new Date(s.breaker_until || 0) - Date.now()) / 1000;
     const dg = (new Date(s.degrade_until || 0) - Date.now()) / 1000;
     const cool = Math.max(s.cool_remaining_sec || 0, bl > 0 ? bl : 0, dg > 0 ? dg : 0);
@@ -474,7 +474,15 @@ function renderAccounts(list) {
         (s.disabled ? '' : '<button class="xs ghost" data-a="disable" data-u="' + esc(s.uid) + '">禁用</button>') +
         '<button class="xs ghost danger" data-a="remove" data-u="' + esc(s.uid) + '">移除</button>' +
       '</td></tr>';
-  }).join('');
+  };
+  // 按地区分组（国内版 / 国际版）：多账号时先看域再看账号，避免 cn/global 混排。
+  const cnList = list.filter(s => s.realm !== 'global');
+  const glList = list.filter(s => s.realm === 'global');
+  const groupRow = (label, n) => '<tr class="group-row"><td colspan="9">' + label +
+    ' · ' + n + ' 个账号</td></tr>';
+  tb.innerHTML =
+    (cnList.length ? groupRow('国内版', cnList.length) + cnList.map(rowHTML).join('') : '') +
+    (glList.length ? groupRow('国际版', glList.length) + glList.map(rowHTML).join('') : '');
 }
 
 // renderModelLocks 模型锁池：哪些模型不能用、锁了几个号、还要锁多久。
@@ -3497,3 +3505,50 @@ if ($('btnExpFold')) {
   };
 }
 applyExpFold();
+
+
+/* ── 通用功能区块折叠 ────────────────────────────────────────────────
+   所有 .box 的 header 末尾注入一个「收起/展开」按钮（与「积分到期提醒」同一交互）。
+   状态存 localStorage；禁用站点数据时抛 SecurityError，用模块级内存兜底，
+   本次会话内照常可折叠（否则点击第一行就中断，用户侧表现为「点了没反应」）。 */
+const LS_BOX_FOLD = 'wb2api.boxfold.v1';
+let boxFoldMem = null;
+function boxFoldMap() {
+  if (boxFoldMem) return boxFoldMem;
+  let m = {};
+  try { m = JSON.parse(localStorage.getItem(LS_BOX_FOLD) || '{}') || {}; } catch (e) { m = {}; }
+  boxFoldMem = m;
+  return m;
+}
+function saveBoxFold(m) {
+  boxFoldMem = m;
+  try { localStorage.setItem(LS_BOX_FOLD, JSON.stringify(m)); } catch (e) {}
+}
+function initBoxFolds() {
+  const boxes = document.querySelectorAll('.box');
+  boxes.forEach((box, i) => {
+    let h = null;
+    for (const el of box.children) { if (el.tagName === 'HEADER') { h = el; break; } }
+    if (!h || h.querySelector('.box-fold')) return;
+    const title = h.querySelector('h3');
+    const key = (title ? title.textContent : 'box' + i).trim().slice(0, 40) || ('box' + i);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'xs ghost box-fold';
+    const apply = (collapsed) => {
+      box.classList.toggle('collapsed', collapsed);
+      btn.textContent = collapsed ? '展开' : '收起';
+      btn.title = collapsed ? '展开此区块' : '收起此区块';
+    };
+    btn.onclick = () => {
+      const m = boxFoldMap();
+      const next = !box.classList.contains('collapsed');
+      m[key] = next ? 1 : 0;
+      saveBoxFold(m);
+      apply(next);
+    };
+    h.appendChild(btn);
+    apply(!!boxFoldMap()[key]);
+  });
+}
+try { initBoxFolds(); } catch (e) {}

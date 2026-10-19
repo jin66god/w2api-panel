@@ -603,6 +603,18 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
     color: var(--ink-2); font-size: 12.5px; }
   .rm-row input { flex: 1; }
 
+
+  /* 通用区块折叠（与积分到期提醒同交互） */
+  .box > header .box-fold { margin-left: 8px; }
+  .box.collapsed > *:not(header) { display: none !important; }
+  /* 账号池按地区分组的分组标题行 */
+  tr.group-row td {
+    background: var(--surface-2);
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--ink-2);
+    padding: 6px 12px;
+  }
 </style>
 <!-- 移动端适配：独立文件，必须在主 <style> 之后（@media 覆盖依赖层叠顺序） -->
 <link rel="stylesheet" href="mobile.css">

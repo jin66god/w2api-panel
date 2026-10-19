@@ -75,6 +75,7 @@ function labelTable(table) {
   for (const th of head.rows[head.rows.length - 1].cells) labels.push(thLabel(th));
   for (const body of table.tBodies) {
     for (const tr of body.rows) {
+      if (tr.classList.contains('group-row')) continue; // 地区分组标题行不是数据行
       let col = 0;
       for (const td of tr.cells) {
         const span = td.colSpan > 1 ? td.colSpan : 1;

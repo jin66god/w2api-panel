@@ -159,6 +159,22 @@ func (p *Pool) pick(tried map[string]bool, reqModel, realm string) *auth.Auth {
 			ws = append(ws, weighted{e: e, w: p.routingWeightOf(e, maxCredits, now), tier: ti, cost1k: ci})
 		}
 	}
+	// 快过期积分「硬优先」（pool.prefer_expiring）：勾选语义是「先用快过期的」，
+	// 不是给一个可能被余额 / 闲置补偿压过的软权重。只要本轮存在快过期候选，
+	// 候选集就收敛到这些账号；等它们余额耗尽或批次过期（expiringNow 转 false）
+	// 后自动回到全量。三种策略共用这一步：加权随机在子集内抽签，轮询 / 顺序
+	// 耗尽在子集内按 UID / account_order 继续走。
+	if p.preferExpiring {
+		expiringCands := make([]weighted, 0, len(ws))
+		for _, w := range ws {
+			if expiringNow(w.e, now) {
+				expiringCands = append(expiringCands, w)
+			}
+		}
+		if len(expiringCands) > 0 {
+			ws = expiringCands
+		}
+	}
 	if strategy := p.strategyForRealmLocked(realm); strategy != WeightedRandom {
 		ordered := make([]*entry, 0, len(ws))
 		for _, w := range ws {

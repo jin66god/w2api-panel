@@ -3,7 +3,6 @@ package pool
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1740,7 +1739,7 @@ func TestTokenUsagePersistsAcrossReload(t *testing.T) {
 	}
 }
 
-func TestPickPrefersExpiringByVirtualWeight(t *testing.T) {
+func TestPickPrefersExpiringHardFirst(t *testing.T) {
 	withNoPickGap(t)
 	p := New("")
 	p.Add(&auth.Auth{UID: "later"})
@@ -1752,21 +1751,49 @@ func TestPickPrefersExpiringByVirtualWeight(t *testing.T) {
 	p.SetCreditsDetailed("soon", 100, 100, 100, now.Add(2*time.Hour), 100)
 	p.SetCreditsDetailed("none", 100, 100, 0, time.Time{}, 0)
 
-	// 3:1 虚拟实例是软偏好而非硬优先。用确定性随机源统计长期分布：两个快过期
-	// 账号的合计份额应显著高于普通账号，同时普通账号仍保留少量流量。
-	rng := rand.New(rand.NewPCG(1, 2))
-	p.SetRandomSource(func(n int64) int64 { return rng.Int64N(n) })
+	// 勾选 prefer_expiring 的语义是「先用快过期的」：非快过期账号一粒流量都不该拿。
+	// 集合内部仍按权重抽签，故两个快过期账号都应出现过。
 	counts := map[string]int{}
-	for i := 0; i < 2000; i++ {
+	for i := 0; i < 500; i++ {
 		got := p.Pick()
 		if got == nil {
 			t.Fatal("pick returned nil")
 		}
 		counts[got.UID]++
 	}
-	expiring := counts["soon"] + counts["later"]
-	if expiring < 1500 || counts["none"] == 0 {
-		t.Fatalf("virtual weight distribution=%v, want expiring majority and regular non-zero", counts)
+	if counts["none"] != 0 {
+		t.Fatalf("快过期账号存在时仍选中普通账号: %v", counts)
+	}
+	if counts["soon"] == 0 || counts["later"] == 0 {
+		t.Fatalf("快过期集合内未按权重轮转: %v", counts)
+	}
+}
+
+// 有序策略同样遵守 prefer_expiring：候选集先收敛到快过期账号，再按 UID /
+// account_order 走；非快过期账号只有在前者清空后才接流量。
+func TestOrderedStrategiesPreferExpiring(t *testing.T) {
+	for _, st := range []string{RoundRobin, SequentialExhaust} {
+		t.Run(st, func(t *testing.T) {
+			withNoPickGap(t)
+			p := New("")
+			p.Add(&auth.Auth{UID: "a-none"})
+			p.Add(&auth.Auth{UID: "b-soon"})
+			now := time.Now()
+			p.SetCreditsDetailed("a-none", 100, 100, 0, time.Time{}, 0)
+			p.SetCreditsDetailed("b-soon", 100, 100, 50, now.Add(time.Hour), 50)
+			if err := p.SetScheduling(RegionStrategies{Domestic: st, International: st}, RegionAccountOrder{}); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 5; i++ {
+				got := p.pick(nil, "", "cn")
+				if got == nil {
+					t.Fatal("pick returned nil")
+				}
+				if got.UID != "b-soon" {
+					t.Fatalf("%s 第 %d 次选中 %s，快过期账号仍可用时应只选它", st, i+1, got.UID)
+				}
+			}
+		})
 	}
 }
 

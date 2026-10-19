@@ -1041,7 +1041,7 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
               <label class="fld"><span class="lb">国际版账号顺序（UID）</span>
                 <input name="international_account_order" placeholder="uid1, uid2, uid3"></label>
             </div>
-            <div class="hint">按地区独立热生效；未列出的账号按 UID 排序追加。指针按地区和模型分别保存。会话粘性、模型成本分层优先；有序策略等待冷却恢复，不提前试探。临时重试或在途占满不推进顺序耗尽的主账号。闲置与快过期积分权重仅用于加权随机。</div>
+            <div class="hint">按地区独立热生效；未列出的账号按 UID 排序追加。指针按地区和模型分别保存。会话粘性、模型成本分层优先；有序策略等待冷却恢复，不提前试探。临时重试或在途占满不推进顺序耗尽的主账号。快过期积分优先对三种策略均生效（先用快过期账号，用完后回到其余）；闲置补偿仅用于加权随机。</div>
             <div class="grid3">
               <label class="fld"><span class="lb">单账号最大在途</span>
                 <input name="max_in_flight" type="number" min="0" placeholder="3">

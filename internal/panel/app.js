@@ -12,6 +12,7 @@ let refTimer = null;
 /* 视图级筛选状态（模块级声明放在文件顶部，避免顶层 go() 早于声明执行时踩 TDZ）。 */
 let mdFilter = { q: '', realm: '', cap: '', effort: '', promo: '', sort: 'default' };
 let mdAll = [], mdProbes = {}, mdProbeOf = () => undefined;
+let mdLocks = [], mdRecent = [];
 let reqFilter = { q: '', outcome: '' };
 let reqEntries = [];
 let usDim = 'account', usCreditDim = 'account', usSort = 'total';
@@ -650,10 +651,18 @@ async function loadModels() {
   const tb = $('mdBody');
   tb.innerHTML = '<tr><td colspan="7"><div class="empty">正在向上游查询…</div></td></tr>';
   try {
-    // 探测数据是可选增强：拉取失败不影响模型列表本身
-    const [d, pr] = await Promise.all([api('models'), api('model_probes').catch(() => ({}))]);
+    // 探测、模型锁与最近请求都是本地可选增强：任一失败不影响模型目录本身。
+    // 可用性标签不额外发推理请求，只用模型锁和最近真实请求结果合成。
+    const [d, pr, st, rm] = await Promise.all([
+      api('models'),
+      api('model_probes').catch(() => ({})),
+      api('status').catch(() => ({})),
+      api('request_metrics').catch(() => ({})),
+    ]);
     mdAll = d.models || [];
     mdProbes = pr.probes || {};
+    mdLocks = Array.isArray(st.model_locks) ? st.model_locks : [];
+    mdRecent = Array.isArray(rm.recent) ? rm.recent : [];
     if (!mdAll.length) {
       tb.innerHTML = '<tr><td colspan="7"><div class="empty">上游未返回模型</div></td></tr>';
       $('mdCount').textContent = '';
@@ -730,6 +739,67 @@ function mdSortList(list, f) {
   return out;
 }
 
+// mdAvailabilityOf 合成 Global 模型当前可用性：模型锁优先于最近请求结果。
+// 只返回有真实本地证据的状态；目录中存在但从未请求过的模型标为“待验证”，
+// 避免把“上游列出了模型”误当成“当前账号有权限”。
+function mdAvailabilityOf(m, locks, recent) {
+  const id = String((m && m.id) || '');
+  if (!id.startsWith('global:')) return null;
+  locks = Array.isArray(locks) ? locks : mdLocks;
+  recent = Array.isArray(recent) ? recent : mdRecent;
+  const bare = id.slice('global:'.length);
+  const lock = locks.find(r => r && r.realm === 'global' && r.model === bare);
+  if (lock) {
+    const reason = String(lock.reason || '').trim();
+    const lower = reason.toLowerCase();
+    if (lock.state === 'partial') {
+      return { key: 'partial', label: '部分可用', cls: 'warn',
+        tip: '仍有 ' + Number(lock.servable || 0) + ' 个 global 账号可服务；已锁 ' + Number(lock.locked || 0) + ' 个' + (reason ? '；' + reason : '') };
+    }
+    if (lock.state === 'starved') {
+      return { key: 'starved', label: '账号暂不可用', cls: 'mute',
+        tip: '没有账号能服务该模型，但并非该模型自身被锁；请检查账号冷却/在途占用' };
+    }
+    if (lower.startsWith('11158') || lower.includes('not allowed for user type')) {
+      return { key: 'denied', label: '无权限', cls: 'bad',
+        tip: '当前 global 账号类型不支持该模型' + (reason ? '；' + reason : '') };
+    }
+    if (lower.startsWith('11102') || lower.includes('service info not found')) {
+      return { key: 'missing', label: '上游无此模型', cls: 'bad',
+        tip: '上游目录残留，实际请求返回模型不存在' + (reason ? '；' + reason : '') };
+    }
+    return { key: 'limited', label: '限流/不可用', cls: 'warn',
+      tip: '模型级冷却中' + (reason ? '；' + reason : '') };
+  }
+  const ev = recent.find(e => e && e.model === id);
+  if (ev) {
+    const status = Number(ev.status || 0);
+    const when = ev.time ? new Date(ev.time).toLocaleString('zh-CN', { hour12: false }) : '';
+    if (ev.outcome === 'success' || (status >= 200 && status < 300)) {
+      return { key: 'ok', label: '可用', cls: 'ok',
+        tip: '最近一次真实请求成功' + (when ? ' · ' + when : '') };
+    }
+    if (status === 429) {
+      return { key: 'rate', label: '限流', cls: 'warn',
+        tip: '最近一次请求被限流' + (when ? ' · ' + when : '') };
+    }
+    if (status >= 500) {
+      return { key: 'upstream', label: '上游错误', cls: 'bad',
+        tip: '最近一次请求上游错误 HTTP ' + status + (when ? ' · ' + when : '') };
+    }
+    return { key: 'failed', label: '最近失败', cls: 'bad',
+      tip: '最近一次请求失败 HTTP ' + (status || '—') + (when ? ' · ' + when : '') };
+  }
+  return { key: 'unknown', label: '待验证', cls: 'mute',
+    tip: '尚无模型锁或近期真实请求记录；目录存在不代表当前账号有权限' };
+}
+
+function mdAvailabilityTag(m) {
+  const av = mdAvailabilityOf(m);
+  if (!av) return '';
+  return ' <span class="tag ' + av.cls + ' md-avail" title="' + esc(av.tip) + '">' + esc(av.label) + '</span>';
+}
+
 // mdRowHtml 单个模型行（纯渲染，便于独立测试）。
 function mdRowHtml(m, pr) {
   const eff = (m.supported_efforts || []).slice();
@@ -744,7 +814,7 @@ function mdRowHtml(m, pr) {
   if (m.supports_reasoning && !m.can_disable_thinking) caps.push('<span class="tag warn">思考常开</span>');
   const capHtml = caps.length ? '<div class="id" style="margin-top:2px">' + caps.join(' ') + '</div>' : '';
   const tip = m.description ? ' title="' + esc(m.description) + '"' : '';
-  return '<tr><td class="mark" aria-hidden="true"><i></i></td><td class="who"' + tip + '><div class="nm">' + esc(m.id) + '</div><div class="id">' + esc(m.name || '') + '</div>' + capHtml + '</td>' +
+  return '<tr><td class="mark" aria-hidden="true"><i></i></td><td class="who"' + tip + '><div class="nm"><span class="mid">' + esc(m.id) + '</span>' + mdAvailabilityTag(m) + '</div><div class="id">' + esc(m.name || '') + '</div>' + capHtml + '</td>' +
     '<td class="num">' + rateCell(m) + '</td>' +
     '<td>' + (m.default_effort ? '<span class="tag ok">' + esc(m.default_effort) + '</span>' : '<span style="color:var(--ink-3)">—</span>') + '</td>' +
     '<td class="efs" style="white-space:normal">' + effs + '</td>' +

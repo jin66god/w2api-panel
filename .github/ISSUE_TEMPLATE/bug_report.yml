@@ -1,0 +1,73 @@
+name: 🐞 Bug 报告
+description: 功能异常、报错、崩溃或行为不符合预期
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请先搜索 [已有 issue](https://github.com/jin66god/workbuddy2api-panel/issues)，并**隐去 `auths/`、`config.json` 中的密钥与 token**。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 面板「账号池」页底部或 `/panel/api/overview` 的 version，或 Release tag / 镜像 digest
+      placeholder: "1.15.0-panel / ghcr.io/jin66god/workbuddy2api-panel:1.15.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: 部署方式
+      options:
+        - Docker Compose（本仓库 docker-compose.yml）
+        - GHCR 镜像 docker run
+        - 单文件二进制（Windows / Linux / macOS）
+        - 源码运行
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: 系统与架构
+      placeholder: "Ubuntu 22.04 / amd64，或群晖 DSM 7.2 / arm64"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 现象
+      description: 实际发生了什么？涉及的页面 / 接口 / 模型。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 /panel/ → …
+        2. 账号 A 执行 …
+        3. 调用 /v1/chat/completions …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 响应
+      description: 相关日志、HTTP 状态码与错误码（如 6004 / 6021 / 11158）。请脱敏。
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认
+      options:
+        - label: 我已搜索过已有 issue，未发现重复
+          required: true
+        - label: 我已移除日志与配置中的凭证、token、cookie
+          required: true

@@ -1,0 +1,51 @@
+name: ✨ 功能建议
+description: 新能力、体验改进或对上游 PR 的整合建议
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请说明**使用场景**而不是只给结论——同一个功能在不同部署规模下优先级差别很大。
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 你现在怎么做？哪一步最费时 / 最容易出错？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的能力
+      description: 具体到接口 / 配置项 / 面板位置更好。
+    validations:
+      required: true
+  - type: textarea
+    id: alternative
+    attributes:
+      label: 备选方案
+      description: 现有配置或外部工具能否绕开？
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      options:
+        - 账号池调度 / 稳定性
+        - 面板 UI / 运维
+        - 定时任务 / 积分
+        - OpenAI 兼容接口 / 协议
+        - 部署 / 镜像 / CI
+        - 文档
+  - type: input
+    id: upstream
+    attributes:
+      label: 相关上游 PR（可选）
+      placeholder: "https://github.com/linguo2625469/workbuddy2api-panel/pull/xxx"
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认
+      options:
+        - label: 我已搜索过已有 issue 与上游 PR，未发现重复
+          required: true

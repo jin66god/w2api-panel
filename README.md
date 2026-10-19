@@ -1,57 +1,58 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/DGZSbot/ai-icon/refs/heads/main/WorkBuddy.png" alt="WorkBuddy2API" width="120">
+  <img src="https://raw.githubusercontent.com/DGZSbot/ai-icon/refs/heads/main/WorkBuddy.png" alt="WorkBuddy2API" width="110">
 </p>
 
 <h1 align="center">WorkBuddy2API Panel</h1>
 
 <p align="center">
-  <b>把腾讯 CodeBuddy 账号变成 OpenAI 兼容 API 的多账号网关 · 附 Web 管理面板</b><br>
-  Web 面板 · OAuth / <b>静态 API Key</b> 双登录 · 账号池轮转 · 熔断与冷却 · 会话粘性 · 定时签到 / 活跃 / 旅行 / 保活 · <b>成长任务一键完成（17/18）</b> · <b>联网搜索端点</b> · 流式 / 非流式
+  <b>把 CodeBuddy 账号变成 OpenAI 兼容 API 的多账号网关 · 自带 Web 管理面板</b><br>
+  账号池轮转 · 冷却与熔断 · 会话粘性 · 定时签到 / 活跃 / 旅行 / 保活 · 成长任务自动化 · 联网搜索
 </p>
 
 <p align="center">
-  <img alt="Go" src="https://img.shields.io/badge/Go-1.22.5-00ADD8?logo=go&logoColor=white&style=flat-square">
+  <a href="https://github.com/jin66god/workbuddy2api-panel/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/jin66god/workbuddy2api-panel?style=flat-square&color=2496ED"></a>
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.23-00ADD8?logo=go&logoColor=white&style=flat-square">
   <img alt="API" src="https://img.shields.io/badge/API-OpenAI_Compatible-412991?style=flat-square">
-  <img alt="Deploy" src="https://img.shields.io/badge/Deploy-Single_Binary%20%7C%20Docker-2496ED?style=flat-square">
-  <img alt="Transport" src="https://img.shields.io/badge/Transport-SSE%20%2F%20Streaming-0DBD8B?style=flat-square">
+  <img alt="Platform" src="https://img.shields.io/badge/Platform-amd64%20%7C%20arm64-0DBD8B?style=flat-square">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green?style=flat-square">
+</p>
+
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#配置说明">配置</a> ·
+  <a href="#web-管理面板">面板</a> ·
+  <a href="#api-端点">API</a> ·
+  <a href="#常见问题">FAQ</a> ·
+  <a href="https://github.com/jin66god/workbuddy2api-panel/releases">下载</a>
 </p>
 
 ---
 
-> **本项目是 [Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api) 的增强分支**（fork）。
-> 上游仓库现已删除；本项目**已同步至上游删库前的最后一次更新**（`ea8b1e5`），此后由本分支独立维护演进。
-> 在上游基础上重构了可视化运维层；差异概览见 [与上游的差异](#-与上游的差异)，上游设计的精巧之处（账号池调度、错误分类、提示词体系）原样保留，详见下文。
-
-> ⚠️ **本项目仅限自用账号（签到 / 保活 / 个人工具接入），不支持同时也是禁止批量小号分发额度、二次打包或收费售卖。** 详见 [使用声明（必读）](#使用声明必读)。
+> **本仓库**是 [linguo2625469/workbuddy2api-panel](https://github.com/linguo2625469/workbuddy2api-panel) 的增强分支（fork），面向**个人自用**的多账号运维。
+> 二进制、Docker 镜像与 Release 均以本仓库为准：`ghcr.io/jin66god/workbuddy2api-panel`。
+>
+> ⚠️ 仅限管理本人授权的账号，**禁止**批量注册、转售额度、加壳或卡密分发。详见[使用声明](#使用声明必读)。
 
 ## 使用声明（必读）
 
-本项目（含上游 [Sliverkiss/workbuddy2api](https://github.com/Sliverkiss/workbuddy2api)，下同）的开发初衷只有一个：**方便个人管理自己的 CodeBuddy 账号**——自动签到、保活、给自己的本地工具提供一个 OpenAI 兼容入口。它是免费、开源、按「原样」提供的个人自用工具。
+本项目是免费、开源、按「原样」提供的个人自用工具，用于管理自己的 CodeBuddy 账号（签到、保活、给本地工具提供 OpenAI 兼容入口）。
 
-近期我们发现有人将本项目用于以下行为：
-
-- **批量注册小号 / 收购账号，对外提供付费 API、共享池、代充等业务**；
-- **二次加壳、捆绑卡密（授权码）售卖**，或以「公益服」「低价中转」等名义变相收费分发。
-
-我们对上述行为**表达最强烈的反对**，并声明如下：
-
-1. **一切商用 / 售卖行为与本项目及作者无关。** 本项目不授权、不支持、不参与任何面向公众的 API 售卖、账号池出租、卡密收费分发；行为人由此产生的一切后果（包括但不限于账号封禁、条款违约与法律风险）由其自行承担，与作者和贡献者无任何关系。
-2. **批量注册与转售接口配额违反目标平台服务条款。** CodeBuddy / 腾讯系服务条款禁止批量注册账号及商业转售接口。上游仓库已删除、停止公开维护——我们无法断定具体原因，但此类滥用行为正在毁掉所有正常使用者的环境，请勿再消耗社区的善意。
-3. **请勿购买任何「收费版」「卡密版」「公益中转版」。** 本项目永远免费开源。任何加壳、加密、捆绑收费的「版本」都是他人篡改的产物，与本项目无关；且此类分发无法审计，存在被植入后门、回传并窃取你 CodeBuddy 凭证的风险（`auths/` 中保存的是明文 accessToken / refreshToken）。**你付钱买到的不是本项目，而是把自己账号交给陌生人的机会。**
-4. **关于开源协议的诚实说明。** 本项目基于 MIT 协议开源，协议允许自由使用与修改源码——这是开源的本意，我们不会收回；但 MIT 赋予的是代码层面的自由，**不赋予**以本项目名义宣传、售卖、捆绑分发，或要求作者提供支持与背书的权利。作者不为任何第三方分发版本提供支持、更新承诺或安全保证。
-5. **作者保留止损的权利。** 若滥用行为持续，作者可能随时停止维护、关闭或删除仓库，且不另行通知。上游的今天可能就是本项目的明天，望自重。
-
-如果你的用途是管理自己的账号，欢迎正常使用、反馈问题与提交 PR。
+- **禁止**批量注册 / 收购账号后对外提供付费 API、共享池、代充；
+- **禁止**二次加壳、捆绑卡密售卖，或以「公益服」「低价中转」名义收费分发；
+- 任何商用、售卖行为与本项目及作者无关，后果由行为人自行承担；
+- 本项目永远免费开源。你买到的任何「收费版」都是他人篡改的产物，且可能窃取 `auths/` 中的明文凭证；
+- 滥用行为持续时，作者保留随时停止维护或关闭仓库的权利。
 
 ## 项目简介
 
-WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾讯 CodeBuddy（`copilot.tencent.com`）账号包装为统一的 `/v1/chat/completions` 服务。
+WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**：通过 OAuth 设备授权或静态 API Key 接入 CodeBuddy 账号，在网关侧完成 token 自动刷新、账号池调度与流量治理，对客户端只暴露标准接口，现有 SDK / 前端 / 工具零改造接入。
 
-- 官方不提供 OpenAI 形态的开放 API，本项目通过 **OAuth 设备授权**（面板「添加账号」或 `login.sh`）获取账号凭证，在网关侧做 token 自动刷新、账号池调度与流量治理；
-- 面向 **个人多账号** 场景：多账号共享、单号故障自动换号、冷却 / 熔断防止雪崩、会话粘性保证多轮上下文不跳号；
-- 对客户端只暴露 OpenAI 兼容接口，现有 SDK / 前端 / 工具 **零改造接入**。
+- 多账号共享，单号故障自动换号；
+- 冷却、熔断、在途租约防止雪崩；
+- 会话粘性保证多轮上下文不跳号；
+- 面板可视化管理账号、任务、配置与日志。
 
-> ⚠️ 合规须知：本项目是**非官方**网关，使用 CodeBuddy 账号作为上游，**仅限本人授权账号、本机 / 私有环境测试**。详细边界见[安全与合规](#安全与合规)。
+> ⚠️ 非官方网关，仅限本人授权账号、本机 / 私有环境测试。合规边界见[安全与合规](#安全与合规)。
 
 ## 核心能力
 
@@ -149,94 +150,57 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**，将腾
 
 成长中心连登档位（连续登录 7/14/28 天）兑换后发放积分 / 能量 / 补签卡 / **抽奖次数**，抽奖次数只能从兑换获得。网关把它挂在每日签到排程末尾自动跑闭环（见[定时任务](#定时任务)）：档位解锁当天自动兑换、有抽奖次数自动抽完，全程无需人工盯。
 
-## 🆚 与上游的差异
+## 相对上游的增强
 
-本分支相对 [上游 master](https://github.com/Sliverkiss/workbuddy2api) 的增量（均已在真实多账号环境验证）：
+本分支在上游 panel 的基础上持续吸收社区 PR 并自研修复，以下为当前已落地能力（均经 `go build` / `go vet` / `go test ./...` 与真实多账号环境验证）。
 
-### 新增
+### 面板与运维
 
 | 能力 | 说明 |
 |---|---|
-| **Web 管理面板** | `internal/panel`，前端 go:embed 单文件进二进制，零外部依赖。账号池可视化（健康色条 / 积分量条 / 冷却倒计时）、积分到期分布、单号运维、批量任务、日志查看、明暗主题 |
-| **请求指标与脱敏日志** | 面板展示完成成功率 / HTTP 成功率 / 平均耗时 / 最近请求，响应带 `X-Request-Id`；JSONL 只归档请求元数据，不写提示词、响应正文或凭证 |
-| **浏览器内 OAuth 添加账号** | 面板「添加账号」按钮完成设备授权 → 凭证落盘 → **热加载进池（免重启）**，替代命令行 `login.sh` 流程 |
-| **在线配置编辑（热生效）** | 面板直接改 `config.json`：API 密钥 / `soft_rate` / 脱敏开关 / 池参数 / 任务排程**立即生效**；装配期字段（listen 等）保存后提示需重启。写入采用深合并 + 原子替换，保留未知键 |
-| **积分任务体系** | 任务列表 / 接受 / 领取接口 + 面板弹窗；「一键完成」覆盖 **17 个任务**（对话 / 领养 / 桌面行为链 / 模板 / 灵感案例 / 画布 / 专家召唤 / 技能尝鲜 / 主题 / 资料库 / 夜猫子等），推进进度、等待异步计分落定后**自动领奖**，纯 API 零客户端依赖 |
-| **限时补偿可观测（issue #189）** | 官方补偿（例：「模型服务异常额外补偿 500 积分」）在账号侧可见，网关改为**先查 `compensation-status` 再决定是否领**：面板「官方补偿」卡片列出待领账号 + 领取截止倒计时（≤48h 标红）+ 逐号/全量领取按钮；**查询失败的账号在卡片上显形为红色行，不会与「没有补偿」混为一谈**；每日签到排程同步走「查→领」，**状态查询失败与领取失败一律显式告警**（旧实现把「没有 / 已领 / 领取失败」三态压成同一形态，带截止日的补偿会静默过期） |
-| **静态 API Key 账号（ck_/pt_）** | 面板「添加账号 → API Key」直接粘贴 CodeBuddy 控制台签发的静态 Key，无需浏览器 OAuth；落盘与 OAuth 账号同形、热加载进池；`NeedsRefresh()` 恒 false（不会因"刷新失败"把好号冷却），额度走企业口径端点，成长类任务排程与面板入口自动隐藏 |
-| **联网搜索 `POST /v1/search/messages`** | 把上游 `/agenttool/v1/search` 包成 Anthropic Messages 兼容形态，DSH 等客户端的搜索 provider 零改动接入；共享账号池的选号 / 在途租约 / token 刷新 / 错误冷却 |
-| **出站 DNS 可指定** | `dns_servers` / `WB2A_DNS` 显式指定出站解析器；Android / magisk / 精简容器没有 `/etc/resolv.conf` 时，Go 解析器会退回 `127.0.0.1:53` 导致全部域名解析失败，此项可直接绕开 |
-| **首启自动生成配置** | 目录下无 `config.json` 时自动生成推荐配置（含 `crypto/rand` 随机 `api_key`），双击即开 |
-| **粘性会话内容回退** | 客户端不发 `conversation_id` 时，用 `system + 首条 user` 哈希派生会话键（`d-` 前缀），通用 OpenAI 客户端也能享受粘性 |
-| **余额后台刷新** | `schedule.balance_refresh_minutes`（默认 5）周期查余额并更新池，冷却账号余额恢复自动解冻 |
-| **模型能力透出** | `/v1/models` 附带 `supported_efforts` / `default_effort` / 积分倍率 / 输入输出上限等上游真实字段 |
-| **安全加固** | 常量时间密钥比较（`internal/httpauth`）、CSP 与安全响应头、UID 白名单防路径穿越、前端属性转义修复 |
-| **领养前置修复** | 上游 `travelAdopt` 缺 report 前置导致领养恒失败于 `first_buddy task not completed yet`；本分支修正后实测 +300 到账（3/3 账号） |
-| **原生工具调用标记还原** | 上游（DeepSeek 系）的工具调用原生语法是带全角竖线的标记文本，**仅在请求声明了 `tools` 时**才被上游解析成结构化 `tool_calls`。实测 `tools` 声明在中转环节（Responses → chat/completions 等）丢失是常态，此时模型仍想调工具，标记就以纯文本落进 `content`——Codex 这类只执行结构化 `function_call` 的客户端会把它当普通正文写进会话历史，回合直接结束、工具一次都没跑。网关在出站响应里识别并还原成 `tool_calls`（流式与非流式都覆盖） |
+| Web 管理面板 | go:embed 单文件，明暗主题、七视图：账号池 / 用量与积分 / 模型档位 / 在线配置 / 运行日志 / 任务中心 / 补偿 |
+| 在线改配置 | 保存即热生效；装配期字段提示需重启。深合并 + 原子替换，保留未知键 |
+| 手机端适配 | ≤760px 抽屉侧栏 + 宽表卡片化 + 窄屏时序图 |
+| 账号备注 | 账号池 / 用量明细 / 积分扣除三表共享映射（本机 localStorage） |
+| 积分历史 | 余额观察者逐次比对留痕，原子落盘、上限 2000 条 |
+| 到期提醒 | 首页快照与「检查」同口径：按自然日聚合批次，`DeductionEndTime` 优先，标注后台刷新节奏 |
+| 积分到期折叠 | 折叠状态内存兜底（localStorage 抛 `SecurityError` 时仍可用）+ 静态资源 `no-cache` + `?v=<版本>` 破 CDN 缓存 |
 
-### 同步上游
+### 接入与协议
 
-**第一轮（fork 基线 `53ee3a1` → `9a87758`，34 个提交）**：四类任务独立排程、pool 文件拆分、12153 连续计数才禁用、429 `code=6004` 模型级限流收窄、11101 不罚号、请求体 413、DeepSeek 思维链、reasoning_content 回填、Codex 指纹脱敏、系统提示词体系、出站 UA 可配等。
-
-**第二轮（`9a87758` → `ea8b1e5`，2026-09-14，只吸收底层）**：
-
-| 上游改动 | 吸收内容 |
+| 能力 | 说明 |
 |---|---|
-| 净化增强 | `tool_calls.arguments` 盲区修复（content=null 的工具调用轮此前完全漏净化）、裸 `11128` 反探测改写、桌面版身份句（逗号形态）漏网修复、反馈句整句改写 |
-| 出站头族 | UA 对齐官方三段式 `WorkBuddy/<ver> WorkBuddy/<ver> CLI/<ver>`（默认 5.5.4/2.137.1，可配）；`X-IDE-*` 用量归属四头 + `X-Agent-Purpose`（`client_name` 配 `WorkBuddy` 即对齐官方桌面端）；`X-Device-Token` 设备风控头（auth 每号 / config / 文件三源）；`X-IDE-Version` 补齐 |
-| 并发修复 | 客户端 IP 改按请求参数传递（消除共享字段竞态）；billing 单段 UA 形态 |
-| 签到幂等 | `IsAlreadyCheckin` 识别"今天已签到"（code=10001/14001），调度日志不再把重复签到当失败 |
-| 粘性按模型判活 | 会话绑定的账号被 6004 模型级限额后，换模型请求自动解绑重分配（治"限额后换不动号"）；`/healthz` 探活计入模型豁免形态（治"全号被单模型限流探活误报 503"） |
-| report 增强 | `ReportChatActivity` 支持独立 `requestID`（同会话多轮上报各条可区分） |
+| 静态 API Key 账号 | `ck_` / `pt_` 直接粘贴，无需浏览器 OAuth；额度走企业口径，成长任务自动隐藏 |
+| 联网搜索 | `POST /v1/search/messages`，Anthropic Messages 兼容，DSH 等客户端零改动接入 |
+| 原生 tool_calls 还原 | 上游标记文本在客户端未声明 `tools` 时还原为结构化 `tool_calls`（流式 / 非流式） |
+| 推理模型兼容 | DeepSeek 思维链注入、`reasoning_content` 回填、effort 档位降级、`reasoning_text` 剥离 |
+| 会话头三件套 | `X-Conversation-ID` 缺失时生成请求级兜底，避免 `11-128 conversation id missing` |
+| 缓存命中修复 | 补齐 body 级 `conversation_id`，修前缀缓存整段未命中 |
 
-未吸收（明确不做）：脚本体系（task_runner/school 脚本—我们已有更完整的纯 API 实现）、governance/CI workflow、成本账本选号（依赖 usage.credit 观测，收益待验证）。
+### 账号池与稳定性
 
-> 上游仓库此后已删除，上述第二轮（`ea8b1e5`）即其**删库前的最后一次更新**，本分支已完整吸收。此后本仓库与上游不再有同步关系，演进以本仓库为准。
-
-**第三轮（`afd6a8f` → `v1.13.2`，2026-10-16，吸收社区 PR + 自研修复）**：
-
-| 来源 | 内容 |
+| 能力 | 说明 |
 |---|---|
-| [PR #138](https://github.com/linguo2625469/workbuddy2api-panel/pull/138) | 面板「运行日志」下新增**积分历史**：在余额查询出口挂观察者，每次真实查到余额与上次比对，变动即留痕（`internal/credithist`：原子落盘、重启续接、上限 2000 条、`\|Δ\|>1e6` 视为脏数据只推基线；`GET /panel/api/credit_history`；签到 / 旅行 / 活跃上报 / 保活 / 面板手动刷新全覆盖） |
-| [PR #185](https://github.com/linguo2625469/workbuddy2api-panel/pull/185) | `429 code=6021 queue.full`（渠道级队列满）归类为 `ErrUpstreamBusy`：不罚号、不轮转，末端 `503 + upstream_busy`（见 FAQ「429 code=6021」） |
-| 本仓库自研（issue #169） | **前缀缓存整段未命中修复**：网关此前只注入 `prompt_cache_key`，而 `hy4-preview-f` / `step-5-preview` 这类后端按 **body 的 `conversation_id`** 分前缀缓存槽，客户端不发 `conversation_id` 时同账号所有会话塌进一个槽互相驱逐（实测 hy4 命中 63%、延续态整段未命中 36%，失败后被钉在公共静态头翻转归零）。现于 `InjectPromptCacheKey` 同步补齐 body 级 `conversation_id`（客户端已带 `conversation_id`/`conversationId` 则绝不覆盖，键的会话成分同源），补齐后实测 90%+ |
+| 地区独立调度 | `pool.strategy.domestic/international`：加权随机 / 轮询 / 顺序耗尽，可配账号顺序，热生效 |
+| 模型黑名单 | `models.hidden`：列表过滤 + 点名调用 400，热生效 |
+| 11158 / 11102 区分 | 账号类型无权限与模型不存在分别避让；模型锁按 realm 隔离；全池无权限返回 400 而非 503 |
+| 6021 queue.full | 渠道级容量满载：不罚号、不轮转，末端 `503 upstream_busy` |
+| 11140 request illegal | 渠道校验拦截改为软冷却，不再永久禁用账号 |
+| refresh 单飞 | 同账号并发 refresh 复用首个结果，避免 RT 反重放撞 `12153` 掉登录 |
+| 出站网络 | `dns_servers` 指定解析器；`HTTP(S)_PROXY` 环境变量自动生效；`cn.chat_base` 支持海外出口改用 `www.workbuddy.cn` |
+| 错误处置 | 12153 连续计数才禁用、404 短冷却、402 硬冷却至次日 04:00、连败降权、积分保底 |
 
-**第四轮（`c1036b0` → `v1.13.3`，2026-10-16，吸收社区 PR）**：
+### 任务与积分
 
-| 来源 | 内容 |
+| 能力 | 说明 |
 |---|---|
-| [PR #190](https://github.com/linguo2625469/workbuddy2api-panel/pull/190) | 会话频道头三件套：`X-Conversation-ID` 缺失时生成请求级兜底（国际版渠道校验要求三个 `X-Conversation-*` 头齐全，缺一即 `400 code=11-128 conversation id missing`） |
-| [PR #159](https://github.com/linguo2625469/workbuddy2api-panel/pull/159) | 剥离 content 里的 `reasoning_text` / `reasoning` 片段（Codex 经 new-api 转换后历史思考片段被透传，上游 content 白名单不含该类型 → `400 code=11101`） |
-| [PR #196](https://github.com/linguo2625469/workbuddy2api-panel/pull/196) | 补偿状态可观测化：官方限时补偿从「签到后盲领」改为「先查后领」+ 截止倒计时 + 面板入口（`GET /panel/api/compensation`、单号/全量领取接口，领取幂等） |
-| [PR #178](https://github.com/linguo2625469/workbuddy2api-panel/pull/178) | 面板账号备注（账号池 / 用量明细 / 积分扣除三表共享备注映射，本机 localStorage）+ 积分到期提醒折叠。1.13.4 修复：折叠状态改内存兜底（禁用站点数据时 localStorage 抛 SecurityError，此前点击会完全无反应）+ 面板静态资源与 API 加 `Cache-Control: no-cache`；1.13.5 起静态资源引用带 `?v=<版本>`（根治 CDN 边缘缓存旧 app.js：升级二进制不会让 Cloudflare 回源，`cf-cache-status: HIT` 返回旧脚本时新按钮无绑定，用户侧就是「点了没反应」） |
-| [PR #143](https://github.com/linguo2625469/workbuddy2api-panel/pull/143) | 面板手机端适配（≤760px 抽屉侧栏 + 宽表卡片化 + 窄屏时序图；独立 `mobile.css` / `mobile.js`，桌面端逐像素不变） |
+| 一键完成 17/18 | 纯 API 推进任务进度、等待异步计分并自动领奖 |
+| 任务补领清扫 | 每 15 分钟幂等 accept / claim「已达标未领」，不跑行为链路，可关 |
+| 一键完成补领 | 遇已达标未领先补领再跳过 |
+| 补偿可观测 | 先查后领、截止倒计时、逐号 / 全量领取 |
+| 连登兑换 | 签到排程末尾自动兑换已解锁档位并抽完奖 |
 
-> 上述五个 PR 合并前逐项做过安全审计：`go.mod` / `go.sum` 未变（无新增依赖）、改动中无外部域名或外发请求（唯一 URL 是测试里的 `fake.example`）、非测试代码无 `exec` / 文件写入、日志不打印凭证；前端保持 `script-src 'self'`（无内联脚本、无外部资源），新增 DOM 拼接全部走 `esc()` 转义。
-
-**第五轮（`b7d0a8a` → `v1.13.6`，2026-10-17，吸收社区 PR + 自研完善）**：
-
-| 来源 | 内容 |
-|---|---|
-| [PR #198](https://github.com/linguo2625469/workbuddy2api-panel/pull/198) | `400 code=11-128 request illegal`（渠道校验拦截，上游 displayTips 明示「请重新发送」）不再永久禁用账号：历史实现直接 `Disable`，把仍可用的国际版账号永久踢出池子、必须人工解冻；现改为账号级软冷却 + 自动轮换，到期自愈（issue #197）。合并时补了 2 条回归测试（request illegal / 14017 均不得 Disabled） |
-| [PR #199](https://github.com/linguo2625469/workbuddy2api-panel/pull/199) | 缓存告警假阳性修复（issue #170）：上游回 `hit=0 + miss=3 + prompt=52703` 时按 `prompt - miss` 对称反推命中量，流式 / 非流式口径统一；`prompt <= miss` 保持 0（真实整段未命中，不误伤） |
-| [PR #204](https://github.com/linguo2625469/workbuddy2api-panel/pull/204) | 「一键完成」遇到「进度已达标但未领奖」先幂等补领再标记跳过，修「真实对话点亮的任务没人领奖、积分卡在半路」（issue #174 顺带项） |
-| [PR #205](https://github.com/linguo2625469/workbuddy2api-panel/pull/205) | 新增周期「任务补领清扫」（issue #174 主体）：每 15 分钟（`schedule.task_sweep_enabled` / `task_sweep_minutes`，可关）扫描全部账号，accept 未接受 + claim 已达标未领，只发幂等请求、不跑任何行为链路；**启动即跑首轮**；per-account 锁跳过忙碌账号；global / 企业版零上游请求。合并时把 claim 逻辑与 #204 统一为 `claimTaskReward(mpOnly)` |
-
-> 第五轮同样做了安全审计：新增行无外部域名 / 外发请求，非测试代码无 `exec` / 文件写入 / `base64` / `eval`，`go.mod` / `go.sum` 无变化；新增上游请求全部复用既有鉴权头与官方域名。
-
-**第六轮（`78471ed` → `v1.14.0`，2026-10-18，吸收社区 PR #144/#162/#193/#213/#217）**：
-
-| 来源 | 内容 |
-|---|---|
-| [PR #217](https://github.com/linguo2625469/workbuddy2api-panel/pull/217) | **同账号 refresh 单飞**（issue #215）：同一 UID 同一时刻只允许一个 refresh 在途，其余调用等待并复用首个结果。上游对 refreshToken 反重放，并发第二发会带已消费的 RT 撞 `12153` 并把整条 RT 链作废（账号从此恒 401、只能人工重登）。附带跨进程兜底：撞 12153 后读回磁盘 auth 文件，若已被另一进程（server + signin 双进程部署）rotate 则采纳并重试一次 |
-| [PR #162](https://github.com/linguo2625469/workbuddy2api-panel/pull/162) | **企业切换会话识别与门控**（`token_source=enterprise_switch`）：该形态下 `/v2/report` 行为事件返回 200 却被上游静默丢弃（15 个成长任务全部 0/x、90s 内进度不跳动），旧实现在白耗真实对话配额且无任何报错。现解析 JWT 声明识别该形态，活跃上报 / 连登 / 旅行 / 夜猫子直接跳过；**签到与任务列表不门控**（实测正常，失败是显式报错），登录时打印可定位的 WARN 与重登指引 |
-| [PR #193](https://github.com/linguo2625469/workbuddy2api-panel/pull/193) | **静态 API Key 账号**（`ck_` / `pt_`）：新增 `POST /panel/api/accounts/add_apikey`（`withAuth`），先用企业额度端点探测有效再落盘；出站按官方 CLI 双头 `Authorization` + `X-API-Key`；`IsAPIKey()` / `NeedsRefresh()` / `UsesEnterpriseBilling()` 分流，签到与成长类排程零上游请求，单账号任务接口返回 `422` 并附说明 |
-| [PR #213](https://github.com/linguo2625469/workbuddy2api-panel/pull/213) | **联网搜索端点** `POST /v1/search/messages`：上游 `/agenttool/v1/search` 的 Anthropic Messages 兼容封装，复用账号池与请求日志记账；含完整测试（含未声明 `web_search` 工具时的拒绝路径） |
-| [PR #144](https://github.com/linguo2625469/workbuddy2api-panel/pull/144) | **出站 DNS 可指定**：`dns_servers` / `WB2A_DNS` 只替换 `Transport.DialContext`（不动超时与连接池），多台按序尝试；修复 Android / 精简容器无 `/etc/resolv.conf` 时解析全落 `[::1]:53` 的问题 |
-
-> 本轮合并统一了一处**门控语义分叉**：#162 要求「企业切换会话签到照常」，#193 要求「静态 Key 无任何个人端点」，两者都改同一批调度入口。为避免过度门控，`auth` 拆成两层：`SupportsPersonalGrowth()`（行为类任务，含企业切换会话）与 `SupportsPersonalEndpoints()`（签到 / 任务列表，仅挡企业版与静态 Key）。合并后全量 `go build` / `go vet` / `go test ./...` 通过（16 个测试包）。
-
-> 安全审计：`go.mod` / `go.sum` 无变化；新增行无外部域名或外发请求（仅文档示例 URL）；非测试代码无 `exec` / 裸文件写入（唯一写盘是用户主动触发的 API Key 落盘，0600 + 原子写）；新增面板接口全部包 `withAuth`；前端保持 `script-src 'self'`。
+> **v1.15.0** 合并社区 PR #223（环境变量代理）、#220（`cn.chat_base`）、#225（模型黑名单）、#221（11158 与 Global 可用性）、#212（到期快照口径）、#158（地区调度）。历史演进见 [Releases](https://github.com/jin66god/workbuddy2api-panel/releases)。
 
 ## 架构总览
 
@@ -283,7 +247,7 @@ mkdir -p auths data && cp config.example.json config.json
 docker run -d --name workbuddy2api \
   -p 7863:7863 -e TZ=Asia/Shanghai \
   -v ./auths:/app/auths -v ./data:/app/data -v ./config.json:/app/config.json \
-  ghcr.io/linguo2625469/workbuddy2api-panel:latest
+  ghcr.io/jin66god/workbuddy2api-panel:latest
 
 # 3. 健康检查（无可用账号时返回 503）
 curl -s http://localhost:7863/healthz
@@ -299,7 +263,7 @@ curl -s http://localhost:7863/healthz
 
 ```bash
 # 1. 克隆
-git clone https://github.com/linguo2625469/workbuddy2api-panel.git
+git clone https://github.com/jin66god/workbuddy2api-panel.git
 cd workbuddy2api-panel
 
 # 2. 准备配置（compose 挂载此文件，缺失会导致容器启动失败）
@@ -462,6 +426,36 @@ curl -s http://localhost:7863/v1/search/messages \
 | `session_sticky.enabled` | `true` | 会话粘性路由开关 |
 | `session_sticky.ttl` | `30m` | 会话绑定 TTL（滚动续期） |
 | `session_sticky.gc_interval` | `5m` | 过期绑定 GC 周期 |
+
+### 按地区配置账号池调度
+
+国内版（`cn`）与国际版（`global`）可独立选择策略，面板「账号池与流量治理」保存后热生效。
+
+国内版（`cn`）与国际版（`global`）可独立选择策略，例如：
+
+```json
+{
+  "pool": {
+    "strategy": {
+      "domestic": "weighted_random",
+      "international": "sequential_exhaust"
+    },
+    "account_order": {
+      "international": ["uid1", "uid2", "uid3"]
+    }
+  }
+}
+```
+
+- **加权随机**：保留原有成本分层、Top5 加权、闲置补偿和快过期积分权重。旧配置缺少策略时，两域均使用此默认值。
+- **轮询**：在当前最优成本层的全部可用账号之间按顺序轮换，不截断 Top5。跳过禁用、暂停、对应模型冷却、积分保底拦截及在途占满的账号。
+- **顺序耗尽**：持续使用当前账号，直到对应模型冷却、账号不可用、积分保底拦截或成本层优先级变化，再向后切换。恢复的早序账号不会抢占仍可用的当前账号，后续轮转可再次使用。请求级重试和在途占满可暂用其他账号，但不推进主账号；普通失败仍按现有熔断规则处理。
+
+两种有序策略仍遵守会话粘性和成本探索，轮询指针 / 顺序耗尽主账号按 `(realm, model)` 独立维护，通过既有本地状态与 Redis 快照机制恢复。全部候选冷却时返回无可用账号，等待既有恢复机制，不提前试探冷却账号；加权随机继续保留原有全冷却兜底。选号和指针更新持池锁，在途租约仍由既有 Acquire/Release 保证。
+
+Web 面板「账号池与流量治理」可分别配置策略和账号顺序，保存后热生效。闲置补偿与快过期积分加权仅影响加权随机。无地区上下文的旧 Pool 入口保留原行为；策略不会改变路由或自动跨地区借号。
+
+本功能不假定国际版免费模型已采用五小时限额；限流及恢复时间继续依据现有上游识别逻辑处理，不硬编码五小时。
 
 ### 上游超时语义（三段各归其位）
 
@@ -693,9 +687,9 @@ CodeBuddy 平台签发的**静态 API Key**（`ck_` / `pt_` 前缀，控制台 A
 - 每自然日 1 次派出：按 CST（Asia/Shanghai）自然日重置，与容器 `TZ` 无关
 - 失败隔离：单账号失败只跳过该账号当趟；401 不强刷（token 刷新交保活时点）
 
-## API 端点
+## 🔍 联网搜索端点
 
-### 联网搜索 `POST /v1/search/messages`
+### `POST /v1/search/messages`
 
 把上游 `/agenttool/v1/search` 包成 **Anthropic Messages 兼容**的搜索端点。这样任何按
 `${baseURL}/messages` 发起搜索的客户端（如 DSH 的 `web-search-deepseek`）只需把搜索
@@ -1068,33 +1062,6 @@ sudo chown -R 10001:10001 ./auths ./data ./config.json
 
 官网「使用端」列按出站请求 UA 服务端归因。配置 `upstream.user_agent: "WorkBuddy/2.x.x"`（或环境变量 `WB2A_USER_AGENT`）即可改写全部出站请求的 UA；默认保持 `CLI/2.63.2 CodeBuddy/2.63.2` 现状（指纹净化考虑，可配而非改死）。
 
-## 关键断言 ↔ 代码出处
-
-| 断言 | 出处 |
-|---|---|
-| `prompt.mode` 默认 `custom` | `cmd/server/config.go:148` |
-| 请求体无网关侧上限（max_body_mb 已移除） | `internal/server/handler.go` chatCompletions 读 body 段 |
-| 出站强制 `stream:true` | `internal/upstream/payload.go:28` |
-| DeepSeek 思维链注入（`thinking.type=enabled`） | `internal/upstream/thinking.go:110` |
-| 默认 `reasoning_effort` 档位 = `high` | `internal/upstream/thinking.go:32` |
-| `reasoning_content` 多轮回填（assistant 消息） | `internal/upstream/thinking.go:54` |
-| Degraded 中性提示词常量 | `internal/prompt/prompt.go:25` |
-| 降级触发与次日 00:00 CST 重置 | `internal/server/degrade.go:30`（Trigger）、`:46`（nextMidnightCST） |
-| 6004 模型级限流 code 与重置时间解析 | `internal/upstream/client.go:127`、`internal/upstream/client.go:147` |
-| `11101` / Unmarshal 失败不罚号 | `internal/upstream/client.go:114-115`；处理分支 `internal/server/handler.go:489` |
-| 出站 UA 覆盖（空 = 现状 `CLI/2.63.2 CodeBuddy/2.63.2`） | `cmd/server/config.go:73`；接线 `cmd/server/main.go:96` |
-| session-dead 连续阈值 3 才禁用 | `internal/pool/pool.go:249-253`（`sessionDeadThreshold`） |
-| `ReviveDisabled` 人工复活 | `internal/pool/pool.go:951` |
-| disabled 账号透出 `disabled_reason` | `internal/pool/pool.go:1162-1165` |
-| 硬冷却至次日 04:00 | `internal/pool/pool.go:882`（`CooldownUntilTomorrow4AM`） |
-| 软冷却退避封顶 2h | `internal/pool/pool.go:247`（`defaultSoftRateMax`） |
-| Top-5 候选短名单 | `internal/pool/pool.go:584` |
-| `activity_hours` 默认 `[10]` | `cmd/server/config.go:135` |
-| 活跃自检回读 streak | `internal/scheduler/scheduler.go:227`（`checkActivityStreak`） |
-| streak 端点 `activity/growth/streak` | `internal/upstream/travel.go:24`（常量）、`:139`（`GrowthStreak`） |
-| Redis 粘性镜像 7 天 TTL | `internal/redisstore/redisstore.go:21` |
-| 静态模型表含 `deepseek-v4-flash` 等 | `internal/server/handler.go:146` |
-
 ## 免责声明
 
 本项目仅供学习和研究使用。使用者需遵守 CodeBuddy 服务条款，自行承担使用风险（包括账号封禁、条款违约等）。作者不对任何因使用本项目产生的直接或间接损失负责。
@@ -1106,31 +1073,3 @@ sudo chown -R 10001:10001 ./auths ./data ./config.json
 - 允许任意使用、复制、修改、合并、发布、分发、再授权及销售
 - 再分发（源码或二进制形式）时，请保留原仓库的 MIT 版权声明与许可声明（如在 NOTICE 或 README 中注明原始出处 `https://github.com/Sliverkiss/workbuddy2api`）
 - 本项目不授予任何上游（CodeBuddy / 腾讯）接口或服务的权利；使用者仍需自行遵守上游服务条款
-
-### 按地区配置账号池调度
-
-国内版（`cn`）与国际版（`global`）可独立选择策略，例如：
-
-```json
-{
-  "pool": {
-    "strategy": {
-      "domestic": "weighted_random",
-      "international": "sequential_exhaust"
-    },
-    "account_order": {
-      "international": ["uid1", "uid2", "uid3"]
-    }
-  }
-}
-```
-
-- **加权随机**：保留原有成本分层、Top5 加权、闲置补偿和快过期积分权重。旧配置缺少策略时，两域均使用此默认值。
-- **轮询**：在当前最优成本层的全部可用账号之间按顺序轮换，不截断 Top5。跳过禁用、暂停、对应模型冷却、积分保底拦截及在途占满的账号。
-- **顺序耗尽**：持续使用当前账号，直到对应模型冷却、账号不可用、积分保底拦截或成本层优先级变化，再向后切换。恢复的早序账号不会抢占仍可用的当前账号，后续轮转可再次使用。请求级重试和在途占满可暂用其他账号，但不推进主账号；普通失败仍按现有熔断规则处理。
-
-两种有序策略仍遵守会话粘性和成本探索，轮询指针 / 顺序耗尽主账号按 `(realm, model)` 独立维护，通过既有本地状态与 Redis 快照机制恢复。全部候选冷却时返回无可用账号，等待既有恢复机制，不提前试探冷却账号；加权随机继续保留原有全冷却兜底。选号和指针更新持池锁，在途租约仍由既有 Acquire/Release 保证。
-
-Web 面板「账号池与流量治理」可分别配置策略和账号顺序，保存后热生效。闲置补偿与快过期积分加权仅影响加权随机。无地区上下文的旧 Pool 入口保留原行为；策略不会改变路由或自动跨地区借号。
-
-本功能不假定国际版免费模型已采用五小时限额；限流及恢复时间继续依据现有上游识别逻辑处理，不硬编码五小时。

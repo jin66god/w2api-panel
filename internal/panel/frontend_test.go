@@ -1603,3 +1603,59 @@ func TestRegionSchedulingFormRoundTrip(t *testing.T) {
 		t.Fatalf("form round trip: %v\n%s", err, out)
 	}
 }
+
+// 面板「上游与高级」的两个新增字段（#220 cn.chat_base / #225 models.hidden）：
+// 回填时数组按逗号 join，保存时按逗号/空白切分；cn.chat_base 是「覆盖型」字段
+// （空串 = 明确回落内置默认），清空必须照发，否则用户以为改回默认了其实没变。
+func TestAppJSAdvancedConfigFields(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; advanced config test skipped")
+	}
+	script := `const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[2], 'utf8');
+const start = src.indexOf('const CFG_MAP');
+const end = src.indexOf('/* Go 时长字段即时校验');
+if (start < 0 || end < 0 || end < start) throw new Error('config region not found');
+const mk = v => ({ type: 'text', value: v });
+const cfgForm = { elements: {
+  cn_chat_base: mk(''),
+  models_hidden: mk(''),
+}};
+const notes = {};
+const ctx = {
+  Date, Number, String, Math, Map, Array, Object, isNaN, URLSearchParams, Set,
+  cfgLoaded: { cn: { chat_base: 'https://www.workbuddy.cn' }, models: { hidden: ['deepseek-pro', 'cn:legacy'] } },
+  api: async () => ({ config: ctx.cfgLoaded, path: '/tmp/config.json' }),
+  $: id => (id === 'cfgForm' ? cfgForm : (notes[id] = notes[id] || { textContent: '' })),
+  markDurationFields() {},
+  toast(msg) { throw new Error(msg); },
+};
+vm.createContext(ctx);
+vm.runInContext(src.slice(start, end) + '\nthis.collectConfig = collectConfig; this.loadConfig = loadConfig;', ctx);
+(async () => {
+  await ctx.loadConfig();
+  const filled = [cfgForm.elements.cn_chat_base.value, cfgForm.elements.models_hidden.value];
+  cfgForm.elements.cn_chat_base.value = '';           // 明确回落默认
+  cfgForm.elements.models_hidden.value = 'x，global:y';
+  const out = ctx.collectConfig();
+  process.stdout.write(JSON.stringify([filled, out.cn.chat_base, out.models.hidden]));
+})().catch(e => { console.error(e); process.exitCode = 1; });`
+	f, err := os.CreateTemp(t.TempDir(), "advcfg-*.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	out, err := exec.Command(node, f.Name(), "app.js").CombinedOutput()
+	if err != nil {
+		t.Fatalf("advanced config node test failed: %v\n%s", err, out)
+	}
+	want := `[["https://www.workbuddy.cn","deepseek-pro, cn:legacy"],"",["x","global:y"]]`
+	if strings.TrimSpace(string(out)) != want {
+		t.Fatalf("advanced config=%s want %s", strings.TrimSpace(string(out)), want)
+	}
+}

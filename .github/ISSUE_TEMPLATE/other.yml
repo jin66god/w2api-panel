@@ -1,0 +1,39 @@
+name: 💬 其他 / 问题咨询
+description: 部署咨询、文档问题、安全报告之外的其他事项
+title: "[Other] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **安全漏洞请勿在此公开**：请通过仓库 Security 页的私密报告（Private vulnerability reporting）提交。
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 类型
+      options:
+        - 部署 / 配置咨询
+        - 文档错误或缺失
+        - 使用疑问
+        - 性能 / 资源占用
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: 详细说明
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 环境信息（可选）
+      description: 版本、部署方式、账号规模。请脱敏。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认
+      options:
+        - label: 我看过 README 的「快速开始」「配置说明」「常见问题」
+          required: true

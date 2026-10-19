@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 部署与配置文档
+    url: https://github.com/jin66god/workbuddy2api-panel#快速开始
+    about: 先看 README 的快速开始、配置说明与常见问题
+  - name: ⬆️ 上游仓库
+    url: https://github.com/linguo2625469/workbuddy2api-panel
+    about: 功能在本仓库缺失时，可先确认上游是否已有对应 PR

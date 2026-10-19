@@ -1115,6 +1115,15 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
               <label class="fld"><span class="lb">出站 User-Agent</span>
                 <input name="user_agent" placeholder="留空 = CLI/2.63.2 CodeBuddy/2.63.2">
                 <span class="hint">影响官网积分记录「使用端」显示；需重启</span></label>
+              <label class="fld"><span class="lb">CN 上游地址</span>
+                <input name="cn_chat_base" placeholder="留空 = copilot.tencent.com">
+                <span class="hint">海外出口可填 https://www.workbuddy.cn；仅 CN 模型目录与对话；需重启</span></label>
+            </div>
+            <div class="hr"></div>
+            <div class="grid2">
+              <label class="fld"><span class="lb">模型黑名单</span>
+                <input name="models_hidden" placeholder="deepseek-pro, cn:legacy-model">
+                <span class="hint">逗号分隔；裸名隐藏两域，cn: / global: 只隐藏该域；保存即热生效</span></label>
             </div>
             <div class="hr"></div>
             <div class="grid2">

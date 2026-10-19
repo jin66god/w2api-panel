@@ -1041,7 +1041,7 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
               <label class="fld"><span class="lb">国际版账号顺序（UID）</span>
                 <input name="international_account_order" placeholder="uid1, uid2, uid3"></label>
             </div>
-            <div class="hint">按地区独立热生效；未列出的账号按 UID 排序追加。指针按地区和模型分别保存。会话粘性、模型成本分层优先；有序策略等待冷却恢复，不提前试探。临时重试或在途占满不推进顺序耗尽的主账号。快过期积分优先对三种策略均生效（先用快过期账号，用完后回到其余）；闲置补偿仅用于加权随机。</div>
+            <div class="hint">按地区独立热生效；未列出的账号按 UID 排序追加。指针按地区和模型分别保存。会话粘性、模型成本分层优先；有序策略等待冷却恢复，不提前试探。临时重试或在途占满不推进顺序耗尽的主账号。<b>完整优先级</b>：会话粘性 → 健康 / 积分保底 / 在途 → 快过期积分（勾选时，优先于成本分层）→ 模型成本分层 → 本策略的账号次序；快过期账号清空后自动回到全量。闲置补偿仅用于加权随机。</div>
             <div class="grid3">
               <label class="fld"><span class="lb">单账号最大在途</span>
                 <input name="max_in_flight" type="number" min="0" placeholder="3">
@@ -1086,13 +1086,16 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
                 <span class="hint">余额低于此值不再接实测收费模型（保住免费模型可用）；0 关闭</span></label>
               <label class="fld"><span class="lb">快过期路由窗口</span>
                 <input name="expiring_soon" placeholder="168h">
-                <span class="hint">窗口内有快过期批次的账号选号权重 ×3（不排序、与金额无关）；0 关闭</span></label>
+                <span class="hint">判定窗口：窗口内有正余额批次才算「快过期」；0 关闭。仅影响下面的「快过期积分优先」判定，不改变账号顺序</span></label>
               <label class="fld"><span class="lb">会话粘性 TTL</span>
                 <input name="ttl" placeholder="30m">
                 <span class="hint">改动需重启进程</span></label>
             </div>
             <div class="switch"><span class="lb">快过期积分优先</span>
               <input type="checkbox" name="prefer_expiring"></div>
+            <div class="hint" style="margin-top:6px">
+              勾选后：只要池里还有「到期窗口内有正余额积分」的可用账号，本轮调度就只用这些账号——<b>优先于模型成本分层</b>（免费号让位，先把要过期的用掉）；三种策略（加权随机 / 轮询 / 顺序耗尽）都生效。快过期账号的积分耗尽或批次过期后，自动回到其余账号。余额低于「积分保底」的账号仍不接收费模型，避免打穿账号。
+            </div>
           </div>
         </div>
 

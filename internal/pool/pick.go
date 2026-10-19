@@ -92,6 +92,28 @@ func (p *Pool) pick(tried map[string]bool, reqModel, realm string) *auth.Auth {
 			maxCredits = e.credits
 		}
 	}
+	// 快过期积分「硬优先」（pool.prefer_expiring）：勾选语义是「先把要过期的用掉」，
+	// 故它排在成本分层之前——否则「快过期号是收费层、池里有免费号」时永远轮不到
+	// 快过期号，开关形同虚设（省下的积分到期照样归零）。
+	//
+	// 前置的 health / floorBlocked / inFlight 过滤已经保证：触底号不接收费模型
+	// （credit_floor），在途占满与不健康号不参与，因此这里不会为了清积分把账号
+	// 打穿或把请求压死在不可用号上。
+	//
+	// 收敛后仍在子集内做成本分层与策略选择：快过期集合里有免费号就先用免费的，
+	// 三种策略（加权随机 / 轮询 / 顺序耗尽）共用同一候选集。等这些批次余额耗尽
+	// 或过期（expiringNow 转 false）后自动回到全量。
+	if p.preferExpiring {
+		expiringCands := make([]*entry, 0, len(cands))
+		for _, e := range cands {
+			if expiringNow(e, now) {
+				expiringCands = append(expiringCands, e)
+			}
+		}
+		if len(expiringCands) > 0 {
+			cands = expiringCands
+		}
+	}
 	// 成本分层（reqModel 非空时）：按该模型的实测扣费把候选分层，只保留最优层。
 	//   0 = 已实测免费（限免期/夜间免费的号，最强偏好）
 	//   1 = 无观测（含观测过期）
@@ -157,22 +179,6 @@ func (p *Pool) pick(tried map[string]bool, reqModel, realm string) *auth.Auth {
 		ti, ci := costTier(e)
 		if ti == bestTier {
 			ws = append(ws, weighted{e: e, w: p.routingWeightOf(e, maxCredits, now), tier: ti, cost1k: ci})
-		}
-	}
-	// 快过期积分「硬优先」（pool.prefer_expiring）：勾选语义是「先用快过期的」，
-	// 不是给一个可能被余额 / 闲置补偿压过的软权重。只要本轮存在快过期候选，
-	// 候选集就收敛到这些账号；等它们余额耗尽或批次过期（expiringNow 转 false）
-	// 后自动回到全量。三种策略共用这一步：加权随机在子集内抽签，轮询 / 顺序
-	// 耗尽在子集内按 UID / account_order 继续走。
-	if p.preferExpiring {
-		expiringCands := make([]weighted, 0, len(ws))
-		for _, w := range ws {
-			if expiringNow(w.e, now) {
-				expiringCands = append(expiringCands, w)
-			}
-		}
-		if len(expiringCands) > 0 {
-			ws = expiringCands
 		}
 	}
 	if strategy := p.strategyForRealmLocked(realm); strategy != WeightedRandom {

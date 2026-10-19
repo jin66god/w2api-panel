@@ -2062,3 +2062,49 @@ func TestResumeIdempotent(t *testing.T) {
 		t.Errorf("Paused 应仍为 false: %+v", st)
 	}
 }
+
+// 快过期优先必须排在成本分层之前：池里同时有「快过期收费号」与「非快过期免费号」
+// 时选前者——否则开关被成本层挡住，省下的积分到期照样归零。
+func TestExpiringBeatsFreeTier(t *testing.T) {
+	withNoPickGap(t)
+	p := New("")
+	p.Add(&auth.Auth{UID: "free"})
+	p.Add(&auth.Auth{UID: "soon"})
+	now := time.Now()
+	p.SetCreditsDetailed("free", 1000, 1000, 0, time.Time{}, 0)
+	p.SetCreditsDetailed("soon", 1000, 1000, 1000, now.Add(time.Hour), 1000)
+	p.NoteModelCost("free", "m", 0, 1000)  // tier 0 实测免费
+	p.NoteModelCost("soon", "m", 10, 1000) // tier 2 实测收费
+	for i := 0; i < 5; i++ {
+		got := p.pick(nil, "m", "cn")
+		if got == nil {
+			t.Fatal("pick returned nil")
+		}
+		if got.UID != "soon" {
+			t.Fatalf("第 %d 次选中 %s：快过期账号仍可用时应优先它（快过期先于成本分层）", i+1, got.UID)
+		}
+	}
+}
+
+// 快过期集合内部仍要做成本分层：同为快过期，免费号优先于收费号。
+func TestExpiringSubsetStillUsesCostTier(t *testing.T) {
+	withNoPickGap(t)
+	p := New("")
+	p.Add(&auth.Auth{UID: "soon-free"})
+	p.Add(&auth.Auth{UID: "soon-paid"})
+	now := time.Now()
+	for _, uid := range []string{"soon-free", "soon-paid"} {
+		p.SetCreditsDetailed(uid, 1000, 1000, 1000, now.Add(time.Hour), 1000)
+	}
+	p.NoteModelCost("soon-free", "m", 0, 1000)
+	p.NoteModelCost("soon-paid", "m", 10, 1000)
+	for i := 0; i < 5; i++ {
+		got := p.pick(nil, "m", "cn")
+		if got == nil {
+			t.Fatal("pick returned nil")
+		}
+		if got.UID != "soon-free" {
+			t.Fatalf("第 %d 次选中 %s：快过期子集内应先选免费层", i+1, got.UID)
+		}
+	}
+}

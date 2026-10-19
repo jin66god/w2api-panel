@@ -165,6 +165,7 @@ func main() {
 	up.GlobalEnabled = cfg.Global.Enabled
 	up.ChatBaseGlobal = cfg.Global.ChatBase
 	up.BillingBaseGlobal = cfg.Global.BillingBase
+	applyCNChatBase(up, cfg)
 	auth.SetGlobalEnabled(cfg.Global.Enabled)
 	// DNS：Android 没有 /etc/resolv.conf，Go 的纯 Go 解析器会退回 127.0.0.1/::1，
 	// 于是查任何域名都变成"连本机 53 端口"（dial tcp: lookup copilot.tencent.com
@@ -543,6 +544,14 @@ func saveConfig(raw []byte, path string, live *livecfg.Holder, p *pool.Pool, up 
 	return restartRequiredFields(newCfg), nil
 }
 
+// applyCNChatBase 把 config cn.chat_base 装配进上游 client；空则保留内置默认，
+// 老配置（无 cn 段）行为不变。
+func applyCNChatBase(up *upstream.Client, cfg *Config) {
+	if cfg.CN.ChatBase != "" {
+		up.ChatBaseCN = cfg.CN.ChatBase
+	}
+}
+
 // restartRequiredFields 返回本次改动中无法热生效、需要重启进程的字段名。
 // 恒返回完整清单中的"与当前进程装配期依赖相关"的项——面板据此提示用户。
 func restartRequiredFields(c *Config) []string {
@@ -562,6 +571,8 @@ func restartRequiredFields(c *Config) []string {
 	// 之后不再读取——不在 livecfg 热快照里，也无法热改。此前漏列，导致面板改完
 	// 显示"已保存"却不提示需要重启，用户以为没生效（issue #102 附带发现 2）。
 	out = append(out, "upstream.user_agent")
+	// cn.chat_base 同样只在装配期写进 up.ChatBaseCN（请求路径并发读取，不做热改）。
+	out = append(out, "cn.chat_base")
 	if c.Upstash.URL != "" || c.Upstash.Token != "" {
 		out = append(out, "upstash")
 	}

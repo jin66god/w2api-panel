@@ -84,6 +84,8 @@ func newTransport() *http.Transport {
 		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
 		IdleConnTimeout:       idleConnTimeout,
 		ResponseHeaderTimeout: responseHeaderTimeout,
+		// 自动读取环境变量中的代理配置
+		Proxy: http.ProxyFromEnvironment,
 	}
 }
 

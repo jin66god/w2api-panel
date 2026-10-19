@@ -257,7 +257,8 @@ curl -s http://localhost:7863/healthz
 > Package settings → Change visibility → Public，否则拉取需要 `docker login ghcr.io`。
 >
 > 镜像 tag 规则：`main` 分支推送 `latest` / `main` / `sha-xxxxxx`；打 `v*` tag 额外发布
-> `1.2.3` / `1.2` / `1` 语义化版本；PR 仅构建验证、不推送。
+> `1.15.0` / `1.15` 语义化版本；`1`（major 别名）与 `1.15.0` 指向同一 manifest，已随本版补齐。
+> PR 仅构建验证、不推送。
 
 ### 方式一：Docker Compose（推荐服务器部署）
 

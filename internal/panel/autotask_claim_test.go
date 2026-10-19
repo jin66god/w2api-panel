@@ -111,3 +111,18 @@ func TestRunAutoAllSkipsClaimedTask(t *testing.T) {
 		t.Fatalf("已领取任务不应再打领奖端点，got %d", got)
 	}
 }
+
+// issue #228：新任务必须同时出现在后端动作表与前端 AUTO_TASKS 中，否则
+// 任务中心不会渲染「一键完成」按钮，或按钮点了返回「无动作」。
+func TestAutoActionWorkBuddyValorant(t *testing.T) {
+	act := autoActionFor("WorkBuddy_Valorant")
+	if act == nil {
+		t.Fatal("WorkBuddy_Valorant 未注册到 autoActions")
+	}
+	if act.run == nil {
+		t.Fatal("WorkBuddy_Valorant 缺少执行函数")
+	}
+	if !strings.Contains(act.Desc, "无畏契约") {
+		t.Fatalf("Desc=%q 未说明任务内容", act.Desc)
+	}
+}

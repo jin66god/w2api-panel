@@ -129,6 +129,11 @@ var autoActions = []autoAction{
 		run:      runExpertLighthouse,
 	},
 	{
+		TaskCode: "WorkBuddy_Valorant",
+		Desc:     "真实「无畏契约拼豆专家」召唤+使用链（issue #228，截止 11-15）",
+		run:      runValorantExpert,
+	},
+	{
 		TaskCode: "black_cat",
 		Desc:     "夜猫子：23:00–08:00 窗口内 glm-5.2 对话补足（窗口外提示稍后再试）",
 		Attempt:  true,
@@ -1001,6 +1006,54 @@ func runExpertLighthouse(p *Panel, a *auth.Auth) (string, error) {
 		return "", fmt.Errorf("使用事件: %w", err)
 	}
 	return "已上报轻量云专家召唤+使用链（真实对话 requestId）", nil
+}
+
+// runValorantExpert 完成 WorkBuddy_Valorant（体验「无畏契约拼豆专家」，issue #228）。
+// 判据与 Expert_lighthouse 同构：市场列表取真实条目 → 召唤链 → 真实对话 →
+// chat 链的 agent_task_created 带 has_expert/expert_id → expert_actual_use(mode=LOCAL)。
+// 专家 ex_xQHHD1u5Jkua（agent_name=valorant-perler-expert），奖励 +100c +5e。
+func runValorantExpert(p *Panel, a *auth.Auth) (string, error) {
+	const expertID = "ex_xQHHD1u5Jkua"
+	ex := upstream.MarketExpert{
+		ExpertID: expertID, ExpertType: "agent",
+		DisplayNameZH: "无畏契约拼豆专家", ProfessionZH: "无畏契约拼豆专家", Version: "1.2.1",
+	}
+	// 市场列表命中真实条目时以服务端信息为准（version / 名称可能被上游更新）。
+	if experts, err := p.cfg.Upstream.MarketExpertList(a, "agent"); err == nil {
+		for _, e := range experts {
+			if e.ExpertID == expertID {
+				ex = e
+				break
+			}
+		}
+	}
+	if err := p.cfg.Upstream.ReportDesktopEvent(a, upstream.DesktopExpertSummonSequence(ex)...); err != nil {
+		return "", fmt.Errorf("召唤链: %w", err)
+	}
+	conv, req, err := p.cfg.Upstream.DesktopChatWithExpert(a, expertID)
+	if err != nil {
+		return "", fmt.Errorf("真实对话: %w", err)
+	}
+	tail := req
+	if len(tail) > 8 {
+		tail = tail[len(tail)-8:]
+	}
+	events := upstream.DesktopChatSequence(conv, req, "msg-"+tail, "fast-model", "fast-model")
+	for _, ev := range events {
+		if ev["eventCode"] == "agent_task_created" {
+			ev["has_expert"] = true
+			ev["expert_id"] = ex.ExpertID
+			ev["expert_name"] = ex.DisplayNameZH
+			ev["expert_industry_id"] = ""
+		}
+	}
+	events = append(events, upstream.DesktopExpertActualUseLocal(ex, conv, req))
+	events[len(events)-1]["type"] = ""
+	events[len(events)-1]["cost"] = 0
+	if err := p.cfg.Upstream.ReportDesktopEvent(a, events...); err != nil {
+		return "", fmt.Errorf("使用事件: %w", err)
+	}
+	return "已上报「无畏契约拼豆专家」召唤+使用链（真实对话 requestId）", nil
 }
 
 // runAppearance 完成 Hp_Appearance（换主题）。

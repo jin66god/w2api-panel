@@ -173,6 +173,13 @@ type Config struct {
 		SanitizeBlacklistFingerprints bool `json:"sanitize_blacklist_fingerprints"`
 	} `json:"features"`
 
+	Models struct {
+		// Hidden 不对外暴露的模型黑名单。裸名=两域都藏；"cn:xxx"/"global:xxx"=只藏该域。
+		// 生效点：GET /v1/models 列表过滤 + POST /v1/chat/completions 点名拒绝。
+		// 面板保存后经 livecfg 热生效，无需重启。
+		Hidden []string `json:"hidden"`
+	} `json:"models"`
+
 	Prompt struct {
 		// Mode passthrough（默认）= 透传客户端原始 system（降级重试仍会切到 Degraded）；
 		// custom = 网关用自有系统提示词替换客户端 system/developer；

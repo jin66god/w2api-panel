@@ -60,6 +60,10 @@
   "features": {
     "sanitize_blacklist_fingerprints": true
   },
+  "models": {
+    "_comment": "hidden: 不对外暴露的模型黑名单。裸名=两域都藏；\"cn:xxx\"/\"global:xxx\"=只藏该域。/v1/models 列表过滤 + chat 点名拒绝，面板保存后热生效。",
+    "hidden": []
+  },
   "prompt": {
     "mode": "passthrough",
     "file": ""

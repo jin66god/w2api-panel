@@ -23,6 +23,8 @@
   "schedule": {
     "checkin_hours": [9, 21],
     "growth_hours": [1],
+    "account_spread_minutes": 0,
+    "account_spread_min_gap_seconds": 0,
     "travel_hours": [9, 21],
     "activity_hours": [10],
     "keepalive_hours": [22],

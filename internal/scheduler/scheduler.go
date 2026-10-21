@@ -32,6 +32,13 @@ type Config struct {
 	GrowthHours    []int // 默认 [1]：成长任务队列（Sequential 族每日零点解锁一环，
 	// 01:00 自动扫描+执行；避开零点整防解锁竞态）
 
+	// AccountSpreadMinutes / AccountSpreadMinGapSeconds 账号级随机摊开
+	// （issue #45）：窗口 > 0 时，每个账号在「时点 + [0, 窗口)」内的确定性
+	// 偏移处执行，可选最小间隔；0 = 关闭，保持整点按顺序执行。
+	// 手动入口（面板「全部签到」等）始终立即执行，不受此配置影响。
+	AccountSpreadMinutes       int
+	AccountSpreadMinGapSeconds int
+
 	// ExpiringSoonWindow 快过期积分窗口：签到/余额刷新查余额时，把到期时间
 	// <= now+window 的套餐余额标记为"快过期"（pool 据此做最早到期优先，见
 	// entry.creditsEarliestExpiry）。<=0 时不做路由门槛；展示仍使用完整逐包数据。
@@ -88,6 +95,11 @@ type Scheduler struct {
 	// balanceInterval 余额刷新间隔（纳秒，0=暂停）。atomic 读写：执行循环每轮读当前值，
 	// SetBalanceInterval 可任意时刻热改（面板保存配置）。
 	balanceInterval atomic.Int64
+
+	// kindRunning 每类任务的「上一批是否仍在窗口内执行」标志（issue #45）。
+	// 窗口 > 0 时 runBatch 不再等待任务结束；若同一 kind 上一批还没跑完
+	// （窗口跨过下一个时点），跳过本次派发，避免同类任务并发。
+	kindRunning [6]atomic.Bool
 
 	// sweepInterval 任务补领清扫间隔（纳秒，0=暂停）。语义同 balanceInterval：
 	// SetTaskSweepInterval 可热改（面板保存配置后下一轮生效）。
@@ -408,37 +420,80 @@ func (s *Scheduler) Run(ctx context.Context) {
 	}
 }
 
-// runBatch 并行派发一批任务（同一唤醒时刻的多类任务），等全部完成返回。
-// ctx 取消时由各任务内部的可取消等待快速收尾。
+// runBatch 派发一批任务（同一唤醒时刻的多类任务）。
+//
+// 窗口关闭（默认）：与历史行为一致，并行派发并等全部完成返回。
+// 窗口开启：**不等**。账号级偏移最长可达窗口（默认配置建议 30–60 分钟），
+// 同步等待会把下一个时点（例如 9 点签到摊到 10 点）整轮挤掉——那不是延迟，
+// 而是过了时点直接选下一天，等于漏跑。此时每类任务自己起 goroutine 执行，
+// runBatch 立即返回；并用 kindRunning 做重入保护，上一批没跑完不再派发第二批。
 func (s *Scheduler) runBatch(ctx context.Context, kinds []taskKind) {
+	window, _ := s.spreadSettings()
+	if window > 0 {
+		for _, k := range kinds {
+			if !s.kindRunning[k].CompareAndSwap(false, true) {
+				log.Printf("schedule: %s 上一批仍在窗口内执行，跳过本次派发", taskKindName(k))
+				continue
+			}
+			go func(k taskKind) {
+				defer s.kindRunning[k].Store(false)
+				s.dispatch(ctx, k, true)
+			}(k)
+		}
+		return
+	}
 	var wg sync.WaitGroup
 	for _, k := range kinds {
 		wg.Add(1)
 		go func(k taskKind) {
 			defer wg.Done()
-			switch k {
-			case taskCheckin:
-				s.RunCheckinNow()
-			case taskTravel:
-				s.RunTravelNow()
-			case taskActivity:
-				s.runActivity(ctx)
-			case taskKeepalive:
-				s.RunKeepaliveNow()
-			case taskBlackcat:
-				s.RunBlackcatNow()
-			case taskGrowth:
-				// 成长任务队列：回调在 panel 侧异步启动（返回不等执行完），nil 未挂载则跳过。
-				s.schedMu.Lock()
-				hook := s.cfg.GrowthHook
-				s.schedMu.Unlock()
-				if hook != nil {
-					hook()
-				}
-			}
+			s.dispatch(ctx, k, false)
 		}(k)
 	}
 	wg.Wait()
+}
+
+// dispatch 执行一类任务。spread=true 时按账号级确定性偏移摊开。
+func (s *Scheduler) dispatch(ctx context.Context, k taskKind, spread bool) {
+	switch k {
+	case taskCheckin:
+		s.runCheckin(spread)
+	case taskTravel:
+		s.runTravel(spread)
+	case taskActivity:
+		s.runActivityCtx(ctx, spread)
+	case taskKeepalive:
+		s.runKeepalive(spread)
+	case taskBlackcat:
+		s.runBlackcat(spread)
+	case taskGrowth:
+		// 成长任务队列：回调在 panel 侧异步启动（返回不等执行完），nil 未挂载则跳过。
+		s.schedMu.Lock()
+		hook := s.cfg.GrowthHook
+		s.schedMu.Unlock()
+		if hook != nil {
+			hook()
+		}
+	}
+}
+
+// taskKindName 日志用任务名。
+func taskKindName(k taskKind) string {
+	switch k {
+	case taskCheckin:
+		return "签到"
+	case taskTravel:
+		return "旅行"
+	case taskActivity:
+		return "活跃上报"
+	case taskKeepalive:
+		return "Token 保活"
+	case taskBlackcat:
+		return "夜猫子"
+	case taskGrowth:
+		return "成长任务"
+	}
+	return "unknown"
 }
 
 // sleepCtx 可取消的等待：ctx 取消立即返回 false（优雅停机不必等限速睡醒），
@@ -463,10 +518,22 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 // 旅行已从签到剥离为独立排程（travel_hours），不再搭签到便车。
 // 末尾追加连登管家（streak.go）：可兑换档位自动兑换 + 抽奖次数自动抽完——
 // 连登兑换按天数解锁，挂在每日签到后即「到天数那天自动完成兑换→抽奖闭环」。
-func (s *Scheduler) RunCheckinNow() {
+func (s *Scheduler) RunCheckinNow() { s.runCheckin(false) }
+
+func (s *Scheduler) runCheckin(spread bool) {
 	expiringSoon := s.ExpiringSoonWindow()
 	includeDisabled := s.includeDisabledInTasks()
-	for _, st := range s.cfg.Pool.List() {
+	list := s.cfg.Pool.List()
+	var plan *spreadPlan
+	if spread {
+		uids := make([]string, 0, len(list))
+		for _, st := range list {
+			uids = append(uids, st.UID)
+		}
+		plan = s.planSpread(taskCheckin, uids)
+	}
+	for _, st := range list {
+		plan.wait(st.UID)
 		if st.Disabled && !includeDisabled {
 			continue
 		}
@@ -535,15 +602,24 @@ func (s *Scheduler) RunCheckinNow() {
 // 「上报 200 但 streak 没涨」的静默丢弃（只读 oracle，不做重试）。
 // RunActivityNow 是无 ctx 的外部入口（面板/测试一次性触发）；排程主循环走
 // runActivity（ctx 取消时立即放弃剩余账号，不等限速睡满）。
-func (s *Scheduler) RunActivityNow() {
-	s.runActivity(context.Background())
-}
+func (s *Scheduler) RunActivityNow() { s.runActivityCtx(context.Background(), false) }
 
-// runActivity 活跃上报遍历，随 ctx 取消立即退出。
-func (s *Scheduler) runActivity(ctx context.Context) {
+// runActivityCtx 活跃上报遍历，随 ctx 取消立即退出；spread=true 时按账号级
+// 确定性偏移摊开（issue #45）。
+func (s *Scheduler) runActivityCtx(ctx context.Context, spread bool) {
 	first := true
 	includeDisabled := s.includeDisabledInTasks()
-	for _, st := range s.cfg.Pool.List() {
+	list := s.cfg.Pool.List()
+	var plan *spreadPlan
+	if spread {
+		uids := make([]string, 0, len(list))
+		for _, st := range list {
+			uids = append(uids, st.UID)
+		}
+		plan = s.planSpread(taskActivity, uids)
+	}
+	for _, st := range list {
+		plan.wait(st.UID)
 		if st.Disabled && !includeDisabled {
 			continue
 		}
@@ -606,9 +682,21 @@ func (s *Scheduler) checkActivityStreak(a *auth.Auth) bool {
 // 12153 禁用走 Pool.NoteSessionDead 的**连续计数**语义：一次刷新失败不再立即杀号，
 // 连续 sessionDeadThreshold 次（3 次）才禁用（P0-1：13 个 disabled 号全是历史误判）。
 // 刷新成功 → ClearSessionDead 清计数（错误判定的账号有复活路径）。
-func (s *Scheduler) RunKeepaliveNow() {
+func (s *Scheduler) RunKeepaliveNow() { s.runKeepalive(false) }
+
+func (s *Scheduler) runKeepalive(spread bool) {
 	includeDisabled := s.includeDisabledInTasks()
-	for _, st := range s.cfg.Pool.List() {
+	list := s.cfg.Pool.List()
+	var plan *spreadPlan
+	if spread {
+		uids := make([]string, 0, len(list))
+		for _, st := range list {
+			uids = append(uids, st.UID)
+		}
+		plan = s.planSpread(taskKeepalive, uids)
+	}
+	for _, st := range list {
+		plan.wait(st.UID)
 		if st.Disabled && !includeDisabled {
 			continue
 		}

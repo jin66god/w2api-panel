@@ -74,6 +74,12 @@ type Config struct {
 		KeepaliveHours []int `json:"keepalive_hours"` // [22]
 		BlackcatHours  []int `json:"blackcat_hours"`  // [23] 夜猫子窗口（23:00–08:00 计数）
 		GrowthHours    []int `json:"growth_hours"`    // [1] 成长任务队列（Sequential 族每日零点解锁，01:00 自动扫描执行）
+		// AccountSpreadMinutes 账号级随机摊开窗口（issue #45）：>0 时每个账号在
+		// 「时点 + [0, 窗口)」的确定性偏移处执行；0 = 关闭（整点按顺序执行）。
+		AccountSpreadMinutes int `json:"account_spread_minutes"`
+		// AccountSpreadMinGapSeconds 摊开后的最小账号间隔（秒）。只做冲突兜底，
+		// 不是等距：先随机、落在间隔内的后者才往后推。0 = 不设下限。
+		AccountSpreadMinGapSeconds int `json:"account_spread_min_gap_seconds"`
 		// CheckinEnabled/TravelEnabled/ActivityEnabled/KeepaliveEnabled/BlackcatEnabled 显式禁用开关（缺省 true）。
 		//
 		// 为什么用独立 bool 而不是空数组/哨兵值表意"禁用"：
@@ -684,6 +690,17 @@ func (c *Config) normalizePrompt() error {
 // 实际可能被当成另一个整点照常执行；这里直接快速失败，并在错误信息里指向正确的开关
 // （checkin_enabled / keepalive_enabled），避免用户靠猜哨兵值来配。
 func (c *Config) validateScheduleHours() error {
+	// 账号级摊开（issue #45）：负值按 0 处理（0 = 关闭），最小间隔不得超过窗口，
+	// 否则「推开」会把窗口尾部挤爆、账号落在外面的时点。
+	if c.Schedule.AccountSpreadMinutes < 0 {
+		c.Schedule.AccountSpreadMinutes = 0
+	}
+	if c.Schedule.AccountSpreadMinGapSeconds < 0 {
+		c.Schedule.AccountSpreadMinGapSeconds = 0
+	}
+	if w := c.Schedule.AccountSpreadMinutes * 60; w > 0 && c.Schedule.AccountSpreadMinGapSeconds > w {
+		c.Schedule.AccountSpreadMinGapSeconds = w
+	}
 	if err := checkHourRange("schedule.checkin_hours", "checkin_enabled", c.Schedule.CheckinHours); err != nil {
 		return err
 	}

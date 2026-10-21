@@ -32,7 +32,7 @@ import (
 )
 
 // appVersion 网关版本（fork 版：面板 + 任务体系），透出到 /panel/api/overview。
-const appVersion = "1.17.0-panel"
+const appVersion = "1.17.1-panel"
 
 // usagePathFor 由 state 文件路径推出用量文件路径：同目录、文件名 usage.json。
 // 这样 config 里改 state_file 时用量数据跟着走，不需要额外配置项。
@@ -186,14 +186,16 @@ func main() {
 	upstream.SetModelCatalogPath(stateSibling(cfg.StateFile, "model.json"))
 
 	sch := scheduler.New(scheduler.Config{
-		Pool:           p,
-		Upstream:       up,
-		CheckinHours:   cfg.Schedule.CheckinHours,
-		TravelHours:    cfg.Schedule.TravelHours,
-		ActivityHours:  cfg.Schedule.ActivityHours,
-		KeepaliveHours: cfg.Schedule.KeepaliveHours,
-		BlackcatHours:  cfg.Schedule.BlackcatHours,
-		GrowthHours:    cfg.Schedule.GrowthHours,
+		Pool:                       p,
+		Upstream:                   up,
+		CheckinHours:               cfg.Schedule.CheckinHours,
+		TravelHours:                cfg.Schedule.TravelHours,
+		ActivityHours:              cfg.Schedule.ActivityHours,
+		KeepaliveHours:             cfg.Schedule.KeepaliveHours,
+		BlackcatHours:              cfg.Schedule.BlackcatHours,
+		GrowthHours:                cfg.Schedule.GrowthHours,
+		AccountSpreadMinutes:       cfg.Schedule.AccountSpreadMinutes,
+		AccountSpreadMinGapSeconds: cfg.Schedule.AccountSpreadMinGapSeconds,
 		// 快过期积分优先消耗：签到/余额刷新按此窗口分桶（issue:积分过期）。
 		ExpiringSoonWindow: cfg.ExpiringSoonDur,
 		CheckinDisabled:    !cfg.Schedule.CheckinEnabled,

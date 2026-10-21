@@ -46,9 +46,21 @@ func travelDay(t time.Time) string {
 // 领奖 + 领养前置上报），不发模型对话，与「让位防风控」不冲突；
 // 401/查询失败只跳过该账号本轮（不强刷 token，交 22:00 keepalive）；
 // 账号间限速 travelAccountDelay。
-func (s *Scheduler) RunTravelNow() {
+func (s *Scheduler) RunTravelNow() { s.runTravel(false) }
+
+func (s *Scheduler) runTravel(spread bool) {
 	first := true
-	for _, st := range s.cfg.Pool.List() {
+	list := s.cfg.Pool.List()
+	var plan *spreadPlan
+	if spread {
+		uids := make([]string, 0, len(list))
+		for _, st := range list {
+			uids = append(uids, st.UID)
+		}
+		plan = s.planSpread(taskTravel, uids)
+	}
+	for _, st := range list {
+		plan.wait(st.UID)
 		if st.Disabled {
 			continue
 		}

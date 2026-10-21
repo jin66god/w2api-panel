@@ -19,12 +19,24 @@ var nowForNightWindow = time.Now
 
 // RunBlackcatNow 对所有可用账号执行夜猫子对话补足（窗口外跳过）。
 // 由 blackcat_hours 排程（默认 [23]）触发；执行前二次校验 InNightWindow。
-func (s *Scheduler) RunBlackcatNow() {
+func (s *Scheduler) RunBlackcatNow() { s.runBlackcat(false) }
+
+func (s *Scheduler) runBlackcat(spread bool) {
 	if !upstream.InNightWindow(nowForNightWindow()) {
 		log.Printf("blackcat: 当前不在 23:00–08:00 计数窗口，跳过")
 		return
 	}
-	for _, st := range s.cfg.Pool.List() {
+	list := s.cfg.Pool.List()
+	var plan *spreadPlan
+	if spread {
+		uids := make([]string, 0, len(list))
+		for _, st := range list {
+			uids = append(uids, st.UID)
+		}
+		plan = s.planSpread(taskBlackcat, uids)
+	}
+	for _, st := range list {
+		plan.wait(st.UID)
 		// 暂停选号（paused）账号跳过：夜猫子是全任务体系中唯一「整任务都是
 		// 真实模型对话」的（RunNightChats 逐条 ChatStream 发 glm-5.2 短对话），
 		// 与「让位防风控」正面冲突。旅行/成长任务都是纯上报或领奖 RPC，照常跑。

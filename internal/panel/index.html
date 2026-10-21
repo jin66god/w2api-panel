@@ -985,6 +985,19 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
             <div class="hr"></div>
             <div class="grid2">
               <div>
+                <label class="fld"><span class="lb">账号级摊开窗口（分钟）</span>
+                  <input type="number" min="0" name="account_spread_minutes" placeholder="0 = 关闭">
+                  <span class="hint">每个账号在时点后 [0, 窗口) 内按确定性随机时刻执行，降低多号同刻的时间相关性；0 = 关闭，整点按顺序执行。窗口应小于相邻时点的间隔</span></label>
+              </div>
+              <div>
+                <label class="fld"><span class="lb">账号最小间隔（秒）</span>
+                  <input type="number" min="0" name="account_spread_min_gap_seconds" placeholder="0 = 不设下限">
+                  <span class="hint">只做冲突兜底：先随机，落入该间隔的后者才往后推，不会变成等距。账号数 × 5 分钟 ≤ 窗口时一般用不上</span></label>
+              </div>
+            </div>
+            <div class="hr"></div>
+            <div class="grid2">
+              <div>
                 <div class="switch"><span class="lb">猫猫旅行</span>
                   <input type="checkbox" name="travel_enabled"></div>
                 <label class="fld"><span class="lb">旅行时点（小时，逗号分隔）</span>

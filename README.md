@@ -67,7 +67,7 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**：通过
 | 🧠 **推理模型兼容** | DeepSeek 思维链注入（`thinking.type=enabled` + 默认档）、`reasoning_content` 多轮回填、effort 档位自动降级 |
 | 🔍 **联网搜索** | `POST /v1/search/messages` 把上游 `/agenttool/v1/search` 包成 Anthropic Messages 兼容形态（DSH 等客户端的搜索 provider 零改动接入）；复用账号池选号 / 在途租约 / token 刷新 / 错误冷却，出站请求头对齐官方客户端 |
 | 💬 **系统提示词体系** | `passthrough`（默认）/ `append` / `custom` 三模式；可选仅替换 Harness 身份首句；遇内容拦截可降级重试 |
-| 🗑️ **指纹脱敏** | 出站请求体黑名单指纹字段清洗（可关闭，含 DeepSeek Harness 身份句），与提示词体系两层叠加 |
+| 🗑️ **指纹脱敏** | 出站请求体黑名单指纹字段清洗（可关闭）：Claude Code / Codex 模板句、裸 `11-128`、DeepSeek Harness 品牌词。品牌词只改写 `system` / `developer`（实测 user 消息同一短语不触发拦截），用户输入 / assistant 回复 / 工具结果原样保留 |
 | 📊 **可观测** | 每请求一行表格日志（TTFB / token 速率 / uid）；`/healthz` 带 `service` 身份标识可接负载均衡 / 宿主探活 |
 | 💾 **状态持久化** | 池状态本地原子落盘 + Upstash Redis 异步镜像（可选），重启择新恢复 |
 | 🖥️ **Web 管理面板** | 内嵌单页面板（明暗主题，七个视图）：账号运维 / 用量与积分分析 / 模型档位条件查询 / 在线改配置（热生效）/ 运行日志（含**调用来源 IP·UA** 与时间区间）/ 积分任务，见 [Web 管理面板](#-web-管理面板) |
@@ -508,7 +508,7 @@ Web 面板「账号池与流量治理」可分别配置策略和账号顺序，�
 客户端（Claude Code / Codex 等 CLI）会在 system prompt 注入固定模板句，上游内容审核按**逐字精确匹配**误杀合法流量（HTTP 400 + 审核文案）。网关提供两层防护，互不替代：
 
 1. **提示词体系**（解决 **system / developer 来源**的误报）：由 `prompt.mode` 控制
-2. **指纹脱敏**（兜底 **用户 / assistant 消息**里的指纹串）：由 `features.sanitize_blacklist_fingerprints` 控制（默认开启）。内置规则同时覆盖 Claude Code / Codex 模板句、裸 `11-128` 错误码，以及 DeepSeek harness 的身份首句 `You are an AI agent powered by DeepSeek Harness`（改写成 `You are CodeBuddy Code`，保留原标点与后续内容）
+2. **指纹脱敏**（出站前统一清洗）：由 `features.sanitize_blacklist_fingerprints` 控制（默认开启）。内置规则覆盖 Claude Code / Codex 模板句、裸 `11-128` 错误码，以及 DeepSeek Harness：身份首句 `You are CodeBuddy Code` 改写成新版 CodeBuddy 首句（保留原标点与后续内容）；裸品牌词 `DeepSeek Harness` 只对 `system` / `developer` 改写成 `DeepSeekRuntime`，`user` / `assistant` / `tool` 里的同名文本原样保留（上游渠道校验只看系统提示词，改写用户数据没有必要）
 
 | 模式 | 语义 |
 |---|---|

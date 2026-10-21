@@ -190,7 +190,7 @@ func TestMultimodalTextPartOnly(t *testing.T) {
 		map[string]any{"type": "text", "text": ccIdentity},
 		imgPart,
 	}
-	out, changed := sanitizeContent(content)
+	out, changed := sanitizeContent(content, false)
 	if !changed {
 		t.Fatal("expected change")
 	}
@@ -434,4 +434,80 @@ func TestPrepareBodyOptSanitizesDeepSeekHarnessSystem(t *testing.T) {
 func newTestUpstream(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(h)
+}
+
+// DSH 品牌词只在身份消息（system/developer）里改写：上游 11-128 渠道校验看的是
+// 系统提示词；user/assistant 里的同名文本实测不触发，改写会污染用户数据。
+func TestDSHBrandRewrittenInSystemMessage(t *testing.T) {
+	const in = "You are interacting through the DeepSeek Harness Web GUI."
+	msgs := []any{map[string]any{"role": "system", "content": in}}
+	if !sanitizeMessages(msgs) {
+		t.Fatal("system message with brand word not sanitized")
+	}
+	got := msgs[0].(map[string]any)["content"].(string)
+	if strings.Contains(got, "DeepSeek Harness") || !strings.Contains(got, "DeepSeekRuntime") {
+		t.Fatalf("brand word not rewritten: %q", got)
+	}
+	// 幂等：再次净化不得继续变化。
+	msgs2 := []any{map[string]any{"role": "system", "content": got}}
+	if sanitizeMessages(msgs2) {
+		t.Fatalf("not idempotent: %q", msgs2[0].(map[string]any)["content"])
+	}
+}
+
+// 品牌词不得进入全局快路径：否则非身份文本会被 sanitizeText 末尾的 TrimSpace
+// 裁掉首尾空白（用户输入被静默改写）。
+func TestDSHBrandNotGlobalFingerprint(t *testing.T) {
+	const onlyBrand = "You are interacting through the DeepSeek Harness Web GUI."
+	if hasFingerprint(onlyBrand) {
+		t.Error("brand word must not hit the global fast path")
+	}
+	if out := sanitizeText(onlyBrand); out != onlyBrand {
+		t.Errorf("non-identity text altered: %q", out)
+	}
+	if out := sanitizeTextIdentity(onlyBrand); !strings.Contains(out, "DeepSeekRuntime") {
+		t.Errorf("identity text not rewritten: %q", out)
+	}
+}
+
+// user / assistant 内容原样保留，连首尾空白都不能动。
+func TestDSHBrandUserContentUntouched(t *testing.T) {
+	const in = "  DeepSeek Harness  "
+	msgs := []any{
+		map[string]any{"role": "user", "content": in},
+		map[string]any{"role": "assistant", "content": "DeepSeek Harness"},
+	}
+	if sanitizeMessages(msgs) {
+		t.Fatal("non-identity messages should not change")
+	}
+	if got := msgs[0].(map[string]any)["content"].(string); got != in {
+		t.Errorf("user content altered: %q", got)
+	}
+	if got := msgs[1].(map[string]any)["content"].(string); got != "DeepSeek Harness" {
+		t.Errorf("assistant content altered: %q", got)
+	}
+}
+
+func TestDSHBrandDeveloperRewritten(t *testing.T) {
+	msgs := []any{map[string]any{"role": "developer", "content": "DeepSeek Harness"}}
+	if !sanitizeMessages(msgs) {
+		t.Fatal("developer message not sanitized")
+	}
+	if got := msgs[0].(map[string]any)["content"].(string); got != "DeepSeekRuntime" {
+		t.Errorf("developer content = %q, want DeepSeekRuntime", got)
+	}
+}
+
+// 全链路：system 改写、user 保留。
+func TestPrepareBodyDSHBrandSystemOnly(t *testing.T) {
+	body := []byte(`{"model":"deepseek-v4.1-flash","messages":[` +
+		`{"role":"system","content":"You are interacting through the DeepSeek Harness Web GUI."},` +
+		`{"role":"user","content":"the DeepSeek Harness checkout is here"}]}`)
+	out := string(PrepareBodyOpt(body, true))
+	if !strings.Contains(string(out), "DeepSeekRuntime") {
+		t.Fatalf("system brand not rewritten: %s", out)
+	}
+	if strings.Count(string(out), "DeepSeek Harness") != 1 {
+		t.Errorf("user content should keep the brand word: %s", out)
+	}
 }

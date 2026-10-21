@@ -44,6 +44,7 @@ const (
 	ErrPromptTooLong                 // 11115「prompt is too long」→ 请求级错误（上下文超限是请求的问题非账号的问题）：不罚号、不轮转，末端透传原文
 	ErrImageInvalid                  // 图片请求格式/数据无效 → 请求级错误：不罚号、不轮转，末端透传原文
 	ErrUpstreamBusy                  // 6021「queue.full.title」渠道级容量满载（非账号问题）→ 不罚号、不轮转，末端 503 + upstream_busy
+	ErrModelBusy                     // 14003「Model busy」模型后端间歇繁忙 → 只停(账号×模型)短窗口，不罚账号、照常换号
 	ErrClient                        // 其他 4xx / 业务错误
 )
 
@@ -73,6 +74,8 @@ func (k ErrKind) String() string {
 		return "image_invalid"
 	case ErrUpstreamBusy:
 		return "upstream_busy"
+	case ErrModelBusy:
+		return "model_busy"
 	case ErrAccountFault:
 		return "account_fault"
 	case ErrChannelRefused:
@@ -621,6 +624,14 @@ func Classify(status int, body string) ErrKind {
 	if (status == http.StatusTooManyRequests && hasBusinessCode(body, "6021")) || isQueueFullBody(lower) {
 		return ErrUpstreamBusy
 	}
+	// 14003「Model busy. Please switch models or retry later」是**模型后端间歇繁忙**：
+	// 同分钟内既有成功也有 14003，换号可能落到不同分片。必须先于通用 429 兜底——
+	// 按账号级限流处置会给该号打 60s 停车，三个号各命中一次就叠成整分钟黑障，
+	// 客户端连撞几次即熔断（issue #46）。文案固定且语义唯一，不限状态码
+	// （实测 400/429/5xx 都可能出现）。
+	if hasBusinessCode(body, "14003") || strings.Contains(lower, "model busy") {
+		return ErrModelBusy
+	}
 	// status==429 先于 hardMarkers：限流响应 body 高频携带 "quota exceeded"/
 	// "额度不足" 等跨计费/限流两界的措辞，hardMarkers 先判会把限流误归
 	// ErrHardCredit 硬冷却到次日 04:00，白扔号约 12h。状态码是比关键词更权威的
@@ -917,6 +928,23 @@ func (c *Client) prepareBody(body []byte, realm, uid, conversationID string) []b
 	// 让同一客户端对同一账号的连续请求命中上游前缀缓存。
 	body = InjectPromptCacheKey(body, uid, conversationID)
 	return body
+}
+
+// ResolveEffortFor 返回该 realm / 模型下「请求档位实际生效的值」，供请求日志
+// 显示降级链路（issue #43）。能力快照与判定函数与 prepareBody 完全同源：
+// 日志算出来的档位就是真正写进出站 body 的档位，不会出现两套口径。
+// requested 为空（客户端没发）、未知档位或模型无能力信息时原样返回。
+func (c *Client) ResolveEffortFor(realm, model, requested string) string {
+	if strings.TrimSpace(requested) == "" {
+		return ""
+	}
+	efforts := c.effortsSnapshot(realm)
+	if realmKey(realm) == "global" {
+		// 与 prepareBody 同口径：global 域 = 远端探测桶 ∪ 产品静态兜底表。
+		efforts, _ = globalEffortMap(efforts, c.defaultEffortsSnapshot(realm))
+	}
+	eff, _ := ResolveEffort(model, requested, efforts)
+	return eff
 }
 
 // effortsSnapshot 返回 effort 能力缓存副本；nil 表示未知（透传不降级）。

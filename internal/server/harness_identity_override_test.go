@@ -33,8 +33,8 @@ func TestHarnessIdentityOverrideEndToEnd(t *testing.T) {
 					sentBody, _ = io.ReadAll(r.Body)
 					return &http.Response{
 						StatusCode: 200,
-						Header: http.Header{"Content-Type": []string{"text/event-stream"}},
-						Body: io.NopCloser(strings.NewReader(sseOK)),
+						Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+						Body:       io.NopCloser(strings.NewReader(sseOK)),
 					}, nil
 				})},
 				ChatBaseCN: "https://fake.example",
@@ -54,7 +54,7 @@ func TestHarnessIdentityOverrideEndToEnd(t *testing.T) {
 			}
 			var obj struct {
 				Messages []struct {
-					Role string `json:"role"`
+					Role    string `json:"role"`
 					Content string `json:"content"`
 				} `json:"messages"`
 			}

@@ -13,10 +13,11 @@ import (
 // sanitizeFeatures 特征预检：任一命中才进入净化（strings.Contains 快速路径，
 // 普通请求全不中 → 原样返回，零分配）。
 var sanitizeFeatures = []string{
-	"x-anthropic-billing-header", // header 键值段键名
-	"cc_entrypoint=",             // 尾随裸键值（截断前缀即可命中）
-	"You are Claude Code",        // 身份句（截断前缀即可命中）
-	"Main branch (",              // 注入指令句（截断前缀即可命中）
+	"x-anthropic-billing-hdr", // header 键值段键名
+	"DeepSeek Harness",        // DeepSeek harness 注入的身份首句（issue #1）
+	"cc_entrypoint=",          // 尾随裸键值（截断前缀即可命中）
+	"You are Claude Code",     // 身份句（截断前缀即可命中）
+	"Main branch (",           // 注入指令句（截断前缀即可命中）
 	"You are a coding agent running in the Codex CLI", // Codex instructions 首段（截断前缀即可命中）
 	"github.com/anthropics/",                          // 反馈句里的 Anthropic 仓库链接
 	"11128",                                           // 上游反探测：裸数字错误码
@@ -48,6 +49,15 @@ var sanitizeKvRe = regexp.MustCompile(`(?i)\bcc_[a-z0-9_]+=[^;\n]*;?\s*`)
 // 注意仍要求 "You are Claude Code, " 前缀，不做更宽的子串替换，
 // 以免误伤 TestExactMatchOnlyVariantNotTouched 所保护的零散文本。
 var sanitizeRewrites = [][2]string{
+	{
+		// DeepSeek harness 在 system 首句注入的固定身份声明
+		// （"You are an AI agent powered by DeepSeek Harness."）。上游按该句识别
+		// 非官方渠道并回 11-128；替换为新版 CodeBuddy 默认身份首句（issue #1）。
+		// 匹配串故意不带结尾标点：句号 / 逗号 / 换行三种形态一并覆盖，
+		// 原有标点与后续内容原样保留。
+		"You are an AI agent powered by DeepSeek Harness",
+		"You are CodeBuddy Code",
+	},
 	{
 		"You are Claude Code, Anthropic's official CLI for Claude",
 		"You are Claude Code, Anthropic's official CLI tool for Claude",

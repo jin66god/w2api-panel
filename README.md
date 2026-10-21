@@ -67,7 +67,7 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**：通过
 | 🧠 **推理模型兼容** | DeepSeek 思维链注入（`thinking.type=enabled` + 默认档）、`reasoning_content` 多轮回填、effort 档位自动降级 |
 | 🔍 **联网搜索** | `POST /v1/search/messages` 把上游 `/agenttool/v1/search` 包成 Anthropic Messages 兼容形态（DSH 等客户端的搜索 provider 零改动接入）；复用账号池选号 / 在途租约 / token 刷新 / 错误冷却，出站请求头对齐官方客户端 |
 | 💬 **系统提示词体系** | `passthrough`（默认）/ `append` / `custom` 三模式；可选仅替换 Harness 身份首句；遇内容拦截可降级重试 |
-| 🗑️ **指纹脱敏** | 出站请求体黑名单指纹字段清洗（可关闭），与提示词体系两层叠加 |
+| 🗑️ **指纹脱敏** | 出站请求体黑名单指纹字段清洗（可关闭，含 DeepSeek Harness 身份句），与提示词体系两层叠加 |
 | 📊 **可观测** | 每请求一行表格日志（TTFB / token 速率 / uid）；`/healthz` 带 `service` 身份标识可接负载均衡 / 宿主探活 |
 | 💾 **状态持久化** | 池状态本地原子落盘 + Upstash Redis 异步镜像（可选），重启择新恢复 |
 | 🖥️ **Web 管理面板** | 内嵌单页面板（明暗主题，七个视图）：账号运维 / 用量与积分分析 / 模型档位条件查询 / 在线改配置（热生效）/ 运行日志（含**调用来源 IP·UA** 与时间区间）/ 积分任务，见 [Web 管理面板](#-web-管理面板) |
@@ -187,6 +187,7 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**：通过
 | 模型黑名单 | `models.hidden`：列表过滤 + 点名调用 400，热生效 |
 | 11158 / 11102 区分 | 账号类型无权限与模型不存在分别避让；模型锁按 realm 隔离；全池无权限返回 400 而非 503 |
 | 6021 queue.full | 渠道级容量满载：不罚号、不轮转，末端 `503 upstream_busy` |
+| 14003 model busy | 模型后端间歇繁忙：只停「账号 × 该模型」10s（不写账号级冷却），全池被挡且剩余 ≤10s 时请求内等一次再重试；超时 `503 model_busy` + `Retry-After` |
 | 11-128 / 11140 分流 | 11-128 通道校验失败是请求级错误：不罚号、不冷却、不轮转，原样透传 400；11140 账号限制连续 3 次才禁用并提示在 WorkBuddy 申诉 |
 | refresh 单飞 | 同账号并发 refresh 复用首个结果，避免 RT 反重放撞 `12153` 掉登录 |
 | 出站网络 | `dns_servers` 指定解析器；`HTTP(S)_PROXY` 环境变量自动生效；`cn.chat_base` 支持海外出口改用 `www.workbuddy.cn` |
@@ -505,7 +506,7 @@ Web 面板「账号池与流量治理」可分别配置策略和账号顺序，�
 客户端（Claude Code / Codex 等 CLI）会在 system prompt 注入固定模板句，上游内容审核按**逐字精确匹配**误杀合法流量（HTTP 400 + 审核文案）。网关提供两层防护，互不替代：
 
 1. **提示词体系**（解决 **system / developer 来源**的误报）：由 `prompt.mode` 控制
-2. **指纹脱敏**（兜底 **用户 / assistant 消息**里的指纹串）：由 `features.sanitize_blacklist_fingerprints` 控制
+2. **指纹脱敏**（兜底 **用户 / assistant 消息**里的指纹串）：由 `features.sanitize_blacklist_fingerprints` 控制（默认开启）。内置规则同时覆盖 Claude Code / Codex 模板句、裸 `11-128` 错误码，以及 DeepSeek harness 的身份首句 `You are an AI agent powered by DeepSeek Harness`（改写成 `You are CodeBuddy Code`，保留原标点与后续内容）
 
 | 模式 | 语义 |
 |---|---|
@@ -930,7 +931,7 @@ http://127.0.0.1:7863/panel/
 每个 `/v1/chat/completions` 请求结束时输出一行表格日志（stdout）：
 
 ```text
-| #001 | 18:31:31 | deepseek-v4 | stream | 200 | uid=0851ce35 | TTFB=801ms | tok=60 | 23.5tok/s | total=2.6s |
+| #001 | 18:31:31 | deepseek-v4 | stream | 200 | uid=0851ce35 | TTFB=801ms | tok=60 | 23.5tok/s | effort=max->high | total=2.6s |
 ```
 
 | 字段 | 说明 |
@@ -943,6 +944,7 @@ http://127.0.0.1:7863/panel/
 | `uid=0851ce35` | 账号 UID 前 8 位 |
 | `TTFB` | 流式首帧耗时（非流式为 `-`） |
 | `tok` / `tok/s` / `total` | 输出 token 数 / 速率 / 总时长 |
+| `effort` | 思考档位。`high` = 客户端要的与实际生效一致；`max->high` = 客户端要 `max`、模型档位表只支持到 `high`（降级链路一目了然，issue #43）；`-` = 客户端没传该字段 |
 
 **敏感度**：日志不含任何 token 明文（详见[安全与合规](#安全与合规)），无落盘日志文件。
 
@@ -1053,6 +1055,17 @@ python3 scripts/probe_max_tokens.py   --base http://127.0.0.1:7863/v1 --key sk-x
 - **不轮转**：同域换号撞的是同一堵墙（同一渠道），直接 fail-fast 返回 `503 + code=upstream_busy`（透传上游原文含 `requestId`），客户端 SDK 按退避自然重试
 - **为什么必须这样**：旧行为按账号级软限流逐号 `CooldownSoftRate(600s)`，全池冷却后 `pickEarliestExpiryLocked` 兜底又把冷却号送上游、再撞 6021 又续订 600s——两者互相喂导致冷却**永不到期**，一次几秒的上游排队被放大成整段时间每个请求都失败
 
+### 429 / 400 code=14003（Model busy）会断流吗？
+
+不会。`14003` + `Model busy. Please switch models or retry later` 是上游**模型后端的间歇繁忙**——同一分钟内既有 14003 也有成功，与账号无关。旧行为把它归进通用 429 → 账号级软冷却 60s，三个号各命中一次就叠成整分钟黑障，客户端连撞几次即熔断，用户侧表现为「用几分钟断一次」。
+
+现在的处置（比单纯缩短冷却更进一步）：
+
+- **只停「账号 × 该模型」10s**：写 `modelCooldowns[model]`，**不写账号级 `until`**。账号仍可为其它模型服务，换号照常（不同号可能落到不同后端分片）
+- **全池被挡时请求内等一次**：仅当「全池该模型都在 14003 短冷却」且「最早解封 ≤10s」才等，等待带 ±25% 抖动（防解封瞬间多请求同时醒来二次聚团），不占换号次数、不占在途名额，每请求最多一次
+- **为什么要在网关里等**：DSH / Codex 这类客户端实测不读 `Retry-After`，收到 503 后按固定间隔连撞，会把 10s 抖动放大成请求风暴并触发熔断
+- **超时降级**：超过 10s 或原因不是 14003（11102/11158 换号必败）→ 立即 `503 + code=model_busy` 并带 `Retry-After`，不拖住客户端
+
 ### 多图会话请求体超限怎么办？
 
 网关**不再设请求体上限**（`server.max_body_mb` 已移除，对齐上游）：任意大小的请求体都会完整读入并转发上游，超限类问题由上游自然返回错误——其响应信息量更大（能看到上游的真实策略），网关不再以 413 提前拦截。
@@ -1086,7 +1099,7 @@ sudo chown -R 10001:10001 ./auths ./data ./config.json
 
 ### 系统提示词被内容策略误杀怎么办？
 
-默认 `prompt.mode=custom` 已用网关自有提示词替换客户端 system，从源头消除大部分误报；用户 / assistant 消息中的指纹串由 `features.sanitize_blacklist_fingerprints` 清洗，两层叠加。`passthrough` 模式下首遇拦截会自动换 Degraded 中性提示词同请求重试一次。
+默认 `prompt.mode=passthrough` 透传客户端 system；如需整体替换可切 `custom`（用网关自有提示词替换客户端 system，从源头消除大部分误报）；用户 / assistant 消息中的指纹串由 `features.sanitize_blacklist_fingerprints` 清洗，两层叠加。`passthrough` 模式下首遇拦截会自动换 Degraded 中性提示词同请求重试一次。
 
 ### 如何让官网「使用端」列显示为 WorkBuddy？
 

@@ -344,6 +344,23 @@ func parseMarkupParams(body string) (string, bool) {
 // 两个来源都为空 → 返回 nil，由调用方决定是否启用弱判定（见 NewMarkupRepair）。
 // 解析失败按空处理（不编造名单）。
 func ToolNameAllowlist(body []byte) map[string]bool {
+	return RequestHintsOf(body).ToolNames
+}
+
+// RequestHints 请求体里改写层与可观测性都需要的轻量信息，一次解析同时取回，
+// 避免对大 body（agentic 场景常见 100KB~1MB）重复反序列化。
+type RequestHints struct {
+	ToolNames map[string]bool
+	// RequestedEffort 客户端原始 reasoning_effort（reasoning_effort / reasoningEffort
+	// 双字段兼容，保留原值大小写）。这是**归一化与补默认档之前**的值：
+	// 日志用它区分「客户端没发档位」与「发了 max 但被模型档位表降级成 high」
+	// （issue #43 的误读来源）。
+	RequestedEffort string
+}
+
+// RequestHintsOf 一次解析请求体，返回工具名白名单与客户端请求的思考档位。
+// 解析失败按空处理（不编造数据），与 ToolNameAllowlist 的历史语义一致。
+func RequestHintsOf(body []byte) RequestHints {
 	var req struct {
 		Tools []struct {
 			Name     string `json:"name"`
@@ -354,7 +371,10 @@ func ToolNameAllowlist(body []byte) map[string]bool {
 		Functions []struct {
 			Name string `json:"name"`
 		} `json:"functions"`
-		Messages []struct {
+		// 思考档位：两个字段名都要认（DeepSeek Harness 发 snake，部分客户端发 camel）。
+		ReasoningEffort      *string `json:"reasoning_effort"`
+		ReasoningEffortCamel *string `json:"reasoningEffort"`
+		Messages             []struct {
 			ToolCalls []struct {
 				Function *struct {
 					Name string `json:"name"`
@@ -366,7 +386,7 @@ func ToolNameAllowlist(body []byte) map[string]bool {
 		} `json:"messages"`
 	}
 	if json.Unmarshal(body, &req) != nil {
-		return nil
+		return RequestHints{}
 	}
 	names := map[string]bool{}
 	for _, t := range req.Tools {
@@ -394,9 +414,16 @@ func ToolNameAllowlist(body []byte) map[string]bool {
 		}
 	}
 	if len(names) == 0 {
-		return nil
+		names = nil
 	}
-	return names
+	effort := ""
+	if req.ReasoningEffort != nil {
+		effort = strings.TrimSpace(*req.ReasoningEffort)
+	}
+	if effort == "" && req.ReasoningEffortCamel != nil {
+		effort = strings.TrimSpace(*req.ReasoningEffortCamel)
+	}
+	return RequestHints{ToolNames: names, RequestedEffort: effort}
 }
 
 // RepairAggregatedResponse 在非流式聚合响应里把正文中的标记还原为 tool_calls。

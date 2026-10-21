@@ -166,15 +166,8 @@ var effortRank = map[string]int{"off": 0, "minimal": 1, "low": 2, "medium": 3, "
 //   - 支持档全部高于请求档 → 取最低支持档（偏离最小）
 //   - 未知模型/未知档位/未携带字段/模型未缓存 → 一律透传
 func normalizeReasoningEffort(obj map[string]any, efforts map[string][]string) {
-	if len(efforts) == 0 {
-		return
-	}
 	model, _ := obj["model"].(string)
 	if model == "" {
-		return
-	}
-	supported, ok := efforts[model]
-	if !ok || len(supported) == 0 {
 		return
 	}
 	key := ""
@@ -190,11 +183,41 @@ func normalizeReasoningEffort(obj map[string]any, efforts map[string][]string) {
 		return
 	}
 	reqStr = strings.TrimSpace(strings.ToLower(reqStr))
-	reqIdx, known := effortRank[reqStr]
-	if !known {
+	if _, known := effortRank[reqStr]; !known {
 		return
 	}
-	// 在 ≤请求档位的支持档里选最高档；命中且与请求不同才改写。
+	best, changed := ResolveEffort(model, reqStr, efforts)
+	if !changed {
+		return
+	}
+	obj[key] = best
+	if effortRank[strings.ToLower(strings.TrimSpace(best))] > effortRank[reqStr] {
+		log.Printf("reasoning_effort floored model=%s %s -> %s", model, reqStr, best)
+	} else {
+		log.Printf("reasoning_effort downgraded model=%s %s -> %s", model, reqStr, best)
+	}
+}
+
+// ResolveEffort 按模型 supportedEfforts 把请求档位解析为实际生效档位。
+// 与 normalizeReasoningEffort 共用同一套规则（唯一口径，防止「日志算出来的
+// 档位」与「真正写进出站 body 的档位」分叉）：
+//   - 请求档位受支持 → 原样返回（changed=false）
+//   - 请求档位不支持 → ≤请求档位的最高支持档
+//   - 支持档全部高于请求档 → 最低支持档
+//   - 未知模型 / 未知档位 / 空 supportedEfforts → 原样返回
+func ResolveEffort(model, requested string, efforts map[string][]string) (string, bool) {
+	reqStr := strings.TrimSpace(strings.ToLower(requested))
+	if reqStr == "" || len(efforts) == 0 {
+		return requested, false
+	}
+	supported, ok := efforts[model]
+	if !ok || len(supported) == 0 {
+		return requested, false
+	}
+	reqIdx, known := effortRank[reqStr]
+	if !known {
+		return requested, false
+	}
 	best, bestIdx := "", -1
 	for _, s := range supported {
 		idx, k := effortRank[strings.TrimSpace(strings.ToLower(s))]
@@ -203,13 +226,11 @@ func normalizeReasoningEffort(obj map[string]any, efforts map[string][]string) {
 		}
 	}
 	if best != "" {
-		if !strings.EqualFold(best, reqStr) {
-			obj[key] = best
-			log.Printf("reasoning_effort downgraded model=%s %s -> %s", model, reqStr, best)
+		if strings.EqualFold(best, reqStr) {
+			return requested, false
 		}
-		return
+		return best, true
 	}
-	// 支持档全部高于请求档：取最低支持档。
 	lowest, lowestIdx := "", 1<<30
 	for _, s := range supported {
 		idx, k := effortRank[strings.TrimSpace(strings.ToLower(s))]
@@ -217,10 +238,10 @@ func normalizeReasoningEffort(obj map[string]any, efforts map[string][]string) {
 			lowest, lowestIdx = s, idx
 		}
 	}
-	if lowest != "" {
-		obj[key] = lowest
-		log.Printf("reasoning_effort floored model=%s %s -> %s", model, reqStr, lowest)
+	if lowest != "" && !strings.EqualFold(lowest, reqStr) {
+		return lowest, true
 	}
+	return requested, false
 }
 
 // normalizeRoles 把 messages 里的 developer 角色归一为 system。

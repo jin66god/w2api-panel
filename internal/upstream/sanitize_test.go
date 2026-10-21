@@ -386,6 +386,50 @@ func TestSanitizeMessagesScrubsReasoningField(t *testing.T) {
 	}
 }
 
+// issue #1：DeepSeek harness 会把 "You are an AI agent powered by DeepSeek Harness."
+// 写进 system 首句，上游据此把请求判成非官方渠道（11-128）。脱敏层默认
+// 把它改成 CodeBuddy 的身份首句，同时保留原有标点与后续内容。
+func TestDeepSeekHarnessIdentityRewritten(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"You are an AI agent powered by DeepSeek Harness.", "You are CodeBuddy Code."},
+		{"You are an AI agent powered by DeepSeek Harness.\n\nFollow the project rules.", "You are CodeBuddy Code.\n\nFollow the project rules."},
+		{"You are an AI agent powered by DeepSeek Harness, running in the terminal.", "You are CodeBuddy Code, running in the terminal."},
+	}
+	for _, c := range cases {
+		out := sanitizeText(c.in)
+		if strings.Contains(out, "DeepSeek Harness") {
+			t.Errorf("harness 指纹未被改写: %q", out)
+		}
+		if out != c.want {
+			t.Errorf("sanitizeText(%q) = %q, want %q", c.in, out, c.want)
+		}
+	}
+}
+
+// 只按固定身份句匹配：普通提到 DeepSeek 的对话不被误伤。
+func TestDeepSeekHarnessPlainTextNotTouched(t *testing.T) {
+	for _, in := range []string{
+		"You are an AI agent. Tell me about DeepSeek.",
+		"I am powered by DeepSeek Harness? No, that is the other client.",
+	} {
+		if out := sanitizeText(in); out != in {
+			t.Errorf("plain text rewritten: %q => %q", in, out)
+		}
+	}
+}
+
+// 端到端：默认开启脱敏时，system 首句在出站请求体里已被替换。
+func TestPrepareBodyOptSanitizesDeepSeekHarnessSystem(t *testing.T) {
+	in := []byte(`{"model":"m","messages":[{"role":"system","content":"You are an AI agent powered by DeepSeek Harness.\nRules."},{"role":"user","content":"hi"}]}`)
+	out := string(PrepareBodyOpt(in, true))
+	if strings.Contains(out, "DeepSeek Harness") {
+		t.Fatalf("出站 body 仍含 harness 指纹: %s", out)
+	}
+	if !strings.Contains(out, "You are CodeBuddy Code.") {
+		t.Fatalf("出站 body 未替换身份首句: %s", out)
+	}
+}
+
 // newTestUpstream 起一个假上游并捕获请求。
 func newTestUpstream(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	t.Helper()

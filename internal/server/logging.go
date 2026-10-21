@@ -71,6 +71,12 @@ type chatStat struct {
 	clientIP  string
 	userAgent string
 
+	// 思考档位：effortReq = 客户端原始请求档，effortEff = 网关归一化后实际出站档
+	// （issue #43）。两者不同时流水行显示 effort=max->high，相同只显示一个值，
+	// 客户端没发则为空（不显示，避免把「没观测到」伪装成某个档位）。
+	effortReq string
+	effortEff string
+
 	logged bool
 }
 
@@ -89,8 +95,15 @@ func (s *chatStat) done() {
 		return
 	}
 	s.logged = true
+	effort := ""
+	if s.effortReq != "" {
+		effort = s.effortReq
+		if s.effortEff != "" && !strings.EqualFold(s.effortEff, s.effortReq) {
+			effort = s.effortReq + "->" + s.effortEff
+		}
+	}
 	logChatRowEx(s.ttfb, time.Since(s.start), s.model, s.mode, s.uid, s.nick, s.status, s.toks,
-		s.requestID, s.outcome, s.attempts, s.credit, s.hasCredit, s.clientIP, s.userAgent)
+		s.requestID, s.outcome, s.attempts, s.credit, s.hasCredit, s.clientIP, s.userAgent, effort)
 }
 
 // chatStatsReader 在流式透传时抓取 SSE 末帧的 usage.completion_tokens 精确值，
@@ -117,6 +130,11 @@ type chatStatsReader struct {
 	cacheHit     int
 	cacheMiss    int
 	hasCacheMiss bool
+	// toolCalls 本流出现过的非空 tool_calls 条目数；finishReason 末个非空终态。
+	// issue #44：上游会给出合法的 finish_reason=stop 但零 tool_calls，客户端据此
+	// 当成回合正常完成、工具一次没跑。判据必须在网关侧留痕（只记日志，不改流）。
+	toolCalls    int
+	finishReason string
 	pend         []byte // 已读未返回的行缓存
 }
 
@@ -130,6 +148,13 @@ func (s *chatStatsReader) TTFB() time.Duration { return s.ttfb }
 
 // Tokens 返回末帧 usage.completion_tokens 与是否缺失；无 usage 时 ok=false。
 func (s *chatStatsReader) Tokens() (int, bool) { return s.completionTokens, s.hasCompletionTokens }
+
+// ToolCalls 返回本流出现过的 tool_calls 条目数（按数组长度累计，不看字段是否存在：
+// 上游静默停摆的每一帧都带 "tool_calls":[]，按字段存在判会误判成有调用）。
+func (s *chatStatsReader) ToolCalls() int { return s.toolCalls }
+
+// FinishReason 返回本流最后一个非空 finish_reason。
+func (s *chatStatsReader) FinishReason() string { return s.finishReason }
 
 // Credit 返回末帧 usage.credit（本次真实扣费积分）与是否缺失。
 func (s *chatStatsReader) Credit() (float64, bool) { return s.credit, s.hasCredit }
@@ -173,15 +198,30 @@ func (s *chatStatsReader) parseSSELine(line string) {
 			PromptCacheHitTokens *int     `json:"prompt_cache_hit_tokens"`
 			PromptCacheMissTok   *int     `json:"prompt_cache_miss_tokens"`
 		} `json:"usage"`
+		// 工具调用与终态统计（issue #44）。只收计数与 final reason，不保留正文，
+		// 不改变透传字节；encoding/json 跳过未声明键，长内容不额外分配。
+		Choices []struct {
+			Delta struct {
+				ToolCalls []json.RawMessage `json:"tool_calls"`
+			} `json:"delta"`
+			FinishReason *string `json:"finish_reason"`
+		} `json:"choices"`
 	}
-	if json.Unmarshal([]byte(payload), &chunk) != nil || chunk.Usage == nil {
-		if json.Unmarshal([]byte(payload), &chunk) == nil && len(chunk.Error) > 0 {
-			s.errorFrame = true
-		}
+	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
 		return
 	}
 	if len(chunk.Error) > 0 {
 		s.errorFrame = true
+	}
+	for _, c := range chunk.Choices {
+		// 按数组长度累计：静默停摆的帧带的是空数组 "tool_calls":[]。
+		s.toolCalls += len(c.Delta.ToolCalls)
+		if c.FinishReason != nil && *c.FinishReason != "" {
+			s.finishReason = *c.FinishReason
+		}
+	}
+	if chunk.Usage == nil {
+		return
 	}
 	if chunk.Usage.PromptTokens != nil {
 		s.hasPromptTokens = true
@@ -379,7 +419,7 @@ type requestTrace struct {
 	// model 非 chat 路径的模型标识（搜索写 "WorkBuddy搜索工具"）。chat 路径由
 	// chatStat.model 覆盖，二者不会同时生效。
 	model string
-	stat    *chatStat
+	stat  *chatStat
 	// 调用来源，进入 handler 时一次性采集（见 ServeHTTP / captureClientInfo）。
 	clientIP  string
 	userAgent string
@@ -528,10 +568,11 @@ const (
 	// 旧的 11 字节截断会把 "cn:deepseek-v4-flash" 切成 "cn:deepseek"，让人误以为是另一个模型。
 	chatModelWidth = 26
 	// chatAcctWidth 容纳 "昵称(uid8)"：中文昵称按 2 列/字算，5 字中文 + "(xxxxxxxx)" = 20 列。
-	chatAcctWidth = 22
-	chatTTFBWidth = 8
-	chatTokWidth  = 6
-	chatRateWidth = 11 // 形如 "183.6tok/s"
+	chatAcctWidth   = 22
+	chatTTFBWidth   = 8
+	chatTokWidth    = 6
+	chatRateWidth   = 11 // 形如 "183.6tok/s"
+	chatEffortWidth = 12 // 形如 "max->high" / "high"
 )
 
 // logChatRow 打印一行请求级表格日志（输出 chatLogOut，无 log 时间戳前缀）。
@@ -542,14 +583,14 @@ const (
 //     uid8 时人眼无法判断是哪个号，要辨认必须再查 auths/，排障多一跳；
 //   - toks<0 表示 usage 缺失，显示 "-"。
 func logChatRow(ttfb, total time.Duration, model, mode, uid, nick string, status int, toks int) {
-	logChatRowEx(ttfb, total, model, mode, uid, nick, status, toks, "", "", 0, 0, false, "", "")
+	logChatRowEx(ttfb, total, model, mode, uid, nick, status, toks, "", "", 0, 0, false, "", "", "")
 }
 
 // logChatRowEx 是带请求 ID、结果、重试、积分与调用来源字段的扩展流水行。旧调用保持
 // 原格式；requestID 非空时才追加扩展字段；来源两参均为空时不追加来源段。
 func logChatRowEx(ttfb, total time.Duration, model, mode, uid, nick string, status int, toks int,
 	requestID, outcome string, attempts int, credit float64, hasCredit bool,
-	clientIP, userAgent string) {
+	clientIP, userAgent, effort string) {
 	if !chatLogEnabled {
 		return
 	}
@@ -599,7 +640,11 @@ func logChatRowEx(ttfb, total time.Duration, model, mode, uid, nick string, stat
 		}
 		src = fmt.Sprintf(" src=%s ua=%s |", dashIfEmpty(clientIP), ua)
 	}
-	fmt.Fprintf(chatLogOut, "| #%03d | %s | %s | %s | %d | %s | TTFB=%s | tok=%s | %s | total=%.1fs |%s%s\n",
+	effortField := "-"
+	if effort != "" {
+		effortField = effort
+	}
+	fmt.Fprintf(chatLogOut, "| #%03d | %s | %s | %s | %d | %s | TTFB=%s | tok=%s | %s | effort=%s | total=%.1fs |%s%s\n",
 		seq,
 		time.Now().Format("15:04:05"),
 		model,
@@ -609,6 +654,7 @@ func logChatRowEx(ttfb, total time.Duration, model, mode, uid, nick string, stat
 		logfmt.Pad(ttfbMS, chatTTFBWidth),
 		logfmt.Pad(tokField, chatTokWidth),
 		logfmt.Pad(tokpsField, chatRateWidth),
+		logfmt.Pad(effortField, chatEffortWidth),
 		total.Seconds(),
 		extra,
 		src,

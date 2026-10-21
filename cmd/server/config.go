@@ -308,7 +308,7 @@ func Default() *Config {
 	// ChatBase/BillingBase 缺省空（回落内置默认）。
 	c.Global.Enabled = true
 	c.Features.SanitizeBlacklistFingerprints = true
-	c.Prompt.Mode = "passthrough" // 缺省 passthrough：透传客户端原始 system（对齐上游；custom 由用户显式选择）
+	c.Prompt.Mode = "passthrough"                                 // 缺省 passthrough：透传客户端原始 system（对齐上游；custom 由用户显式选择）
 	c.Prompt.IdentityOverrideText = prompt.DefaultHarnessIdentity // 老配置开关缺省 false，不改变现有行为
 	c.Pool.Strategy = pool.RegionStrategies{Domestic: pool.WeightedRandom, International: pool.WeightedRandom}
 	c.Pool.MaxInFlight = 3

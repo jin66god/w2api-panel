@@ -244,6 +244,37 @@ func (p *Pool) CooldownSoftForModel(uid string, base time.Duration, resetAt time
 	}
 }
 
+// CooldownModelBusy 只给「账号 × 模型」打短冷却，**不写账号级 until**。
+//
+// 14003「Model busy. Please switch models or retry later」是上游模型后端的间歇
+// 繁忙信号（同一分钟内既有 14003 也有成功），不是账号故障。旧的处置把它归进
+// 通用 429 → 账号级软冷却 60s：三个号各自命中一次就叠成整分钟黑障，客户端连撞
+// 几次即熔断（issue #46）。写模型级冷却后，账号仍可服务其它模型，只有这个模型
+// 在短窗口内避让；换号照常进行（不同号可能落到不同后端分片）。
+//
+// 语义与 11102 负缓存 / 6004 模型冷却一致：healthyForModel 按 modelCooldowns
+// 拦截，账号整体健康度不受影响。已有更晚的真实模型冷却时不缩短。
+func (p *Pool) CooldownModelBusy(uid, model string, d time.Duration, reason string) {
+	if uid == "" || model == "" || d <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.byUID[uid]
+	if !ok {
+		return
+	}
+	until := time.Now().Add(d)
+	if e.modelCooldowns == nil {
+		e.modelCooldowns = make(map[string]modelCooldown)
+	}
+	if old, exists := e.modelCooldowns[model]; exists && !old.AuditOnly && old.Until.After(until) {
+		return
+	}
+	e.modelCooldowns[model] = modelCooldown{Until: until, Reason: reason}
+	p.dirty.Store(true)
+}
+
 // RecordModelRateLimitAudit 记录无法参与模型路由的 6004 展示项。
 // 典型场景是 6004 没有可解析重置时间：账号仍按原有有界退避冷却，
 // 本方法只把模型名挂到 e.until 上供账号页展示，不影响 healthyForModel。

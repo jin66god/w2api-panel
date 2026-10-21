@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"sync"
@@ -113,6 +114,47 @@ func (h *Handler) softCooldown() time.Duration {
 // 若共用 soft_rate（600s 起 + 指数升级），一次偶发 404 会把好账号罚 10 分钟并逐次加倍。
 // 故固定 60s 防雪崩即可，不随 soft_rate 配置、也不参与软退避指数。
 const notFoundCooldown = 60 * time.Second
+
+// modelBusyCooldown 14003「Model busy」的模型级停车窗口。
+//
+// 上游繁忙是**间歇**的：同一分钟内既有成功也有 14003，而旧处置把它归进通用 429
+// → 账号级软冷却 60s，三个号各命中一次就叠成整分钟黑障、客户端连撞几次即熔断
+// （issue #46）。这里改成只停「该账号 × 该模型」10s，账号继续服务其它模型；
+// 宁可多交一次不扣费的 14003，也不要把 10 秒抖动停成整分钟不可用。
+const modelBusyCooldown = 10 * time.Second
+
+// modelBusyReason 是 CooldownModelBusy 写入 modelCooldowns 的原因前缀。
+// ModelBlockedForRealm 把它带进 ModelBlockStatus.Reason，等待判定据此
+// 排除 11102/11158/6004（那几类换号必败，等待没有意义）。
+const modelBusyReason = "14003 model busy"
+
+// modelBusyWaitMax 请求内等待的上限：与模型级冷却首档一致。
+// 更久的阻塞不应拖住客户端，交给 503 + Retry-After。
+const modelBusyWaitMax = 10 * time.Second
+
+// modelBusyWaitFor 判断是否值得在请求内等一次再重试整轮（issue #46）。
+//
+// 只在四条同时成立时等待：
+//   - 全池该模型都被模型级冷却挡住（st.Blocked）；
+//   - 挡住的原因确为 14003 model busy（11102 换号必败，等了也是白等）；
+//   - 上游/网关给出的最早解封时间在 modelBusyWaitMax 内；
+//   - 本请求还没等过。
+//
+// 返回的时长是「最早解封还剩多久」；调用方再加抖动，避免解封瞬间多个请求
+// 同时醒来形成二次聚团。
+func modelBusyWaitFor(st pool.ModelBlockStatus, alreadyWaited bool) (time.Duration, bool) {
+	if alreadyWaited || !st.Blocked || st.Until.IsZero() {
+		return 0, false
+	}
+	if !strings.HasPrefix(st.Reason, modelBusyReason) {
+		return 0, false
+	}
+	remaining := time.Until(st.Until)
+	if remaining <= 0 || remaining > modelBusyWaitMax {
+		return 0, false
+	}
+	return remaining, true
+}
 
 // ServiceName 网关身份标识。经 /healthz 响应体 service 字段与 X-Service 头同时透出：
 // 宿主（如 workbuddy-switch 托管网关子进程）探测同端口的旧服务/其他服务时，对方即使
@@ -579,7 +621,10 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// 与「会话历史里出现过的工具名」两个来源——实测 tools 声明会在中转环节丢失，
 	// 只认前者会让修复层在最需要它的场景下失效。
 	// 在提示词/模型名改写之前取（那些改写不动 tools / messages[].tool_calls 子树）。
-	declaredTools := upstream.ToolNameAllowlist(body)
+	// 一次解析同时取工具白名单与客户端请求的思考档位（避免大 body 反序列化两次）：
+	// 后者用于流水行显示 effort=req->eff（issue #43）。
+	reqHints := upstream.RequestHintsOf(body)
+	declaredTools := reqHints.ToolNames
 
 	// realm 前缀解析（D6）：model 名可能带 "[realm:]" 前缀。剥出 realm + bareModel，
 	// bareModel 用于选号/粘性/出站 body 重写（前缀是网关侧路由协议，上游只认裸名）。
@@ -592,6 +637,12 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// 请求级统计：出口即打一行表格日志（任何路径都会走到）。
 	st := newChatStat(time.Now(), body, peek.Stream)
+	if reqHints.RequestedEffort != "" {
+		st.effortReq = reqHints.RequestedEffort
+		if h.cfg.Upstream != nil {
+			st.effortEff = h.cfg.Upstream.ResolveEffortFor(realm, bareModel, reqHints.RequestedEffort)
+		}
+	}
 	if tr := requestTraceFrom(r); tr != nil {
 		tr.stat = st
 		// 来源在 ServeHTTP 入口采集（此时才知道开关与请求头），此处转交给统计对象，
@@ -615,6 +666,9 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// modelBlock 记录本次是否因「模型级冷却」而选不到号（下方 acct==nil 分支填充）。
 	// 默认零值 Blocked=false = 按既有的"没有可用账号"口径报错。
 	var modelBlock pool.ModelBlockStatus
+	// 14003 全池短冷却时的「请求内等一次」状态（issue #46）：
+	// busyWaited = 本请求已等过一次，最多只等一次，防止无限拖住客户端。
+	busyWaited := false
 
 	// 会话粘性：从请求体提取会话键并解析绑定号（找不到/无效则 stickyUID 为空，走普通轮换）。
 	// ExtractKey 与粘性开关解耦（issue #35 侧）：关闭粘性时会话头族的聚合主键仍按
@@ -839,6 +893,32 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			// 两者此前都报 no_healthy_account，导致「模型不可用」被读成「号全挂了」。
 			// 在这里取一次快照，供下方错误构造区分（issue #102 附带发现 1）。
 			modelBlock = h.cfg.Pool.ModelBlockedForRealm(bareModel, realm)
+			// 14003 模型后端间歇繁忙：全池该模型都进了 10s 短冷却时，先等一次
+			// 再重试整轮，而不是立刻 503。
+			//
+			// 为什么必须在网关内等：DSH / Codex 这类客户端实测**不读 Retry-After**，
+			// 收到 503 后按固定 1s 间隔连撞，10s 窗口内打 10 次真实上游调用，最后
+			// 客户端自己熔断——用户看到的就是「经常断」。网关等一次是唯一能保证
+			// 「抖动对客户端不可见」的位置。
+			//
+			// 判据收紧（缺一不可）：
+			//   - 本请求真的撞过 14003（sawModelBusy）：11102/11158/6004 换号必败，
+			//     等了也是白等；
+			//   - 全池该模型都被挡（modelBlock.Blocked）且原因确为 14003；
+			//   - 最早解封在 modelBusyWaitMax 内（更久就让客户端按 Retry-After 等）；
+			//   - 本请求还没等过（每请求最多一次）。
+			if wait, ok := modelBusyWaitFor(modelBlock, busyWaited); ok {
+				busyWaited = true
+				// 不占换号次数、不占在途名额（此刻尚未选号）；带抖动防解封瞬间聚团。
+				log.Printf("INFO: [server] model=%s: all accounts parked by 14003, waiting %s before one retry",
+					bareModel, wait.Round(time.Millisecond))
+				if !sleepCtx(r.Context(), jitterDur(wait)) {
+					break // 客户端已断连：不再等
+				}
+				tried = map[string]bool{} // 等待后允许重新尝试全部账号
+				i--                       // 等待不计入换号次数
+				continue
+			}
 			break
 		}
 		st.uid = acct.UID
@@ -1156,6 +1236,17 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 				log.Printf("WARN: [server] stream acct=%s model=%s: saw %d native tool call block(s) but repaired none (tool names known=%d)",
 					logfmt.Label(acct.UID, acct.Nickname), bareModel, m, len(declaredTools))
 			}
+			// issue #44：上游会给「声明了 tools、零 tool_calls、finish_reason=stop」的
+			// 合法终态，客户端据此把回合当成正常完成、工具一次没跑、任务静默停住。
+			// 网关侧此前完全无痕，排障只能靠客户端抓帧。这里只记一行 WARN：
+			// 不改流、不改状态码、不改 usage——模型「判断这轮不需要工具」是合法行为，
+			// 改写成可重试错误会让正常回合反复重试、每次都真实计费。
+			// 反例边界：没声明 tools 的纯对话出现 stop 完全正常，故必须带 len>0。
+			if repair.Converted() == 0 && len(declaredTools) > 0 && stats.ToolCalls() == 0 &&
+				stats.FinishReason() == "stop" && !stats.SawErrorFrame() {
+				log.Printf("WARN: [server] stream acct=%s model=%s: finish_reason=stop with zero tool_calls despite %d declared tool(s) (silent stop; client may treat the turn as complete)",
+					logfmt.Label(acct.UID, acct.Nickname), bareModel, len(declaredTools))
+			}
 			st.ttfb = stats.TTFB()
 			// usage 缺失时保留 chatStat.toks 的 -1 哨兵（观测缺失 → 显示 "-"），
 			// 不写入零值——否则「没观测到 usage」被伪造成「测得 0 token」，
@@ -1267,6 +1358,13 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			// 含 requestId，客户端按 SDK 退避重试即可。
 			code = "upstream_busy"
 			msg = "upstream capacity is full (queue.full); retry after a short wait"
+		case upstream.ErrModelBusy:
+			// 14003 模型后端间歇繁忙：503 + 可重试语义，并带 Retry-After。
+			// 不能用 400 model_unavailable —— 那是「换模型」的信号，
+			// 而 14003 等几秒就好，客户端应当重试同一模型。
+			status = http.StatusServiceUnavailable
+			code = "model_busy"
+			msg = "model backend is temporarily busy; retry after a short wait"
 		case upstream.ErrModelBlocked:
 			// 11102「该后端无此模型」：上游原文（下方统一透传）已经写清了原因，但
 			// code 此前停在默认的 no_healthy_account —— 那是"服务端过载"的语义，
@@ -1289,7 +1387,26 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	//
 	// 用 400 而非 503：这是"你选的这个模型当前不可用"，不是"服务端暂时过载"。
 	// 换号重试必然同样失败，客户端不该按可重试错误处理。
-	if modelBlock.Blocked {
+	// 14003 短时繁忙：不套用 model_unavailable（400 不可重试），改为 503 + Retry-After。
+	modelBusyBlock := modelBlock.Blocked && strings.HasPrefix(modelBlock.Reason, modelBusyReason)
+	if modelBusyBlock {
+		status = http.StatusServiceUnavailable
+		code = "model_busy"
+		if !upstreamMsgPassed {
+			msg = "model backend is temporarily busy; retry after a short wait"
+		}
+		hint = fmt.Sprintf("model_busy: %d account(s) parked on this model for up to %s",
+			modelBlock.Count, modelBusyWaitMax)
+		if !modelBlock.Until.IsZero() {
+			secs := int(time.Until(modelBlock.Until).Seconds() + 0.999)
+			if secs < 1 {
+				secs = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			hint += "; earliest unblock at " + modelBlock.Until.Format(time.RFC3339)
+		}
+	}
+	if modelBlock.Blocked && !modelBusyBlock {
 		code = "model_unavailable"
 		// 有上游原文时保留它（含 requestId，用户要拿去向上游反馈），只把"有几个号
 		// 被挡、最早何时解封"这类本地调度信息放进 gateway_hint。
@@ -1448,6 +1565,10 @@ func isUpstreamTimeout(err error, clientGone bool) bool {
 // 零值/防御路径下为 nil，冷却时长回落既有计算。
 func (h *Handler) applyErrorPolicy(uid string, kind upstream.ErrKind, body, model string, uerr *upstream.Error) {
 	switch kind {
+	case upstream.ErrModelBusy:
+		// 14003 模型后端间歇繁忙：只停(账号×模型) 10s，**不碰账号级 until**。
+		// 账号整体仍健康，其它模型照常可选；换号也继续（不同号可能落到不同分片）。
+		h.cfg.Pool.CooldownModelBusy(uid, model, modelBusyCooldown, modelBusyReason)
 	case upstream.ErrHardCredit:
 		// 402 + 余额关键词即积分耗尽：同步冷却到次日 04:00（签到任务 09/21 点恢复），
 		// 不需要异步核查（冗余）。立即换号。

@@ -1203,10 +1203,14 @@ function put(obj, path, val) {
  // 保留勾选状态，用户切回 passthrough/append 后无需重新设置。
 function updateIdentityOverrideInputs() {
   const f = $('cfgForm');
-  const allowed = f.elements.prompt_mode.value === 'passthrough' || f.elements.prompt_mode.value === 'append';
+  if (!f || !f.elements) return;
+  // 旧测试桩 / 精简表单可能没有这三个字段：缺任一就静默跳过，
+  // 不能让 loadConfig 在配置回填阶段整体抛错（会把「读取配置失败」弹给用户）。
+  const mode = f.elements.prompt_mode;
   const enabled = f.elements.prompt_identity_override_enabled;
   const text = f.elements.prompt_identity_override_text;
-  if (!enabled || !text) return;
+  if (!mode || !enabled || !text) return;
+  const allowed = mode.value === 'passthrough' || mode.value === 'append';
   enabled.disabled = !allowed;
   text.disabled = !allowed || !enabled.checked;
 }

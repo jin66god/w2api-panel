@@ -166,21 +166,15 @@ jobs:
           PREV="${{ steps.prev.outputs.prev }}"
           {
             echo "body<<RELEASE_BODY_EOF"
-            echo "CI 自动构建发布（五平台二进制 + checksums）。"
-            echo
             if [ -n "$PREV" ]; then
-              echo "### 本版变更"
+              echo "## 更新说明"
               echo
               # 最多 30 条：正常一版只有几条，超出说明 tag 关系异常，不再无限拉长
               git log --no-merges --pretty='- %s' "$PREV..$GITHUB_REF_NAME" | head -30
-              echo
-              echo "完整变更：https://github.com/${{ github.repository }}/compare/$PREV...$GITHUB_REF_NAME"
             else
-              echo "### 本版变更"
+              echo "## 更新说明"
               echo
               git log --no-merges --pretty='- %s' -n 10 "$GITHUB_REF_NAME"
-              echo
-              echo "完整变更：https://github.com/${{ github.repository }}/releases/tag/$GITHUB_REF_NAME"
             fi
             echo "RELEASE_BODY_EOF"
           } >> "$GITHUB_OUTPUT"

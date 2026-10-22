@@ -12,9 +12,10 @@ name: docker-ghcr
 # linux/amd64 与 linux/arm64，防将来回归成单架构。
 on:
   push:
-    branches: [main]
-    # 只在构建相关文件变化时跑（tag push 走同一过滤，但发版必然改
-    # cmd/server/main.go 的 appVersion，故不会被挡住）。纯文档改动不再触发镜像构建。
+    # 只在打 v* tag 时构建镜像：main 合并不再触发完整双架构构建（省一半镜像额度）。
+    # 需要 :main / :sha-* 滚动镜像时手动 workflow_dispatch 一次。
+    tags: ["v*"]
+    # 发版必然改 cmd/server/main.go 的 appVersion，paths 不会挡住 tag 发布。
     paths:
       - "Dockerfile"
       - ".dockerignore"
@@ -26,7 +27,6 @@ on:
       - "*.sh"
       - "config.example.json"
       - ".github/workflows/docker-ghcr.yml"
-    tags: ["v*"]
   pull_request:
     paths:
       - "Dockerfile"

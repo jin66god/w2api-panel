@@ -171,8 +171,13 @@ jobs:
               echo
               # 最多 30 条：正常一版只有几条，超出说明 tag 关系异常，不再无限拉长
               # 只保留面向用户的变更：过滤 ci/chore/docs/test/style/build 类内部提交
-              git log --no-merges --pretty='- %s' "$PREV..$GITHUB_REF_NAME" \
-                | grep -Ev '^- (ci|chore|docs|test|style|build)(\(|:| )' | head -30 || true
+              LIST=$(git log --no-merges --pretty='- %s' "$PREV..$GITHUB_REF_NAME" \
+                | grep -Ev '^- (ci|chore|docs|test|style|build)(\(|:| )' | head -30 || true)
+              # 若全部被过滤（例如本版只有 chore(release) 提交），回退显示完整列表，避免空日志
+              if [ -z "$LIST" ]; then
+                LIST=$(git log --no-merges --pretty='- %s' "$PREV..$GITHUB_REF_NAME" | head -30)
+              fi
+              echo "$LIST"
             else
               echo "## 更新说明"
               echo

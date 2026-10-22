@@ -65,17 +65,15 @@ func officialClientHelloSpec() *utls.ClientHelloSpec {
 			&utls.SessionTicketExtension{},
 			&utls.ALPNExtension{AlpnProtocols: []string{"http/1.1"}},
 			&utls.SignatureAlgorithmsExtension{SupportedSignatureAlgorithms: []utls.SignatureScheme{
-				utls.ECDSAWithP256AndSHA256,
-				utls.PSSWithSHA256,
-				utls.PKCS1WithSHA256,
-				utls.PSSWithSHA384,
-				utls.PKCS1WithSHA384,
-				utls.PSSWithSHA512,
-				utls.PKCS1WithSHA512,
-				utls.PKCS1WithSHA1,
-				utls.ECDSAWithSHA1,
-				utls.ECDSAWithP384AndSHA384,
-				utls.ECDSAWithP521AndSHA512,
+				utls.ECDSAWithP256AndSHA256, // 0x0403
+				utls.PSSWithSHA256,          // 0x0804
+				utls.PKCS1WithSHA256,        // 0x0401
+				utls.ECDSAWithP384AndSHA384, // 0x0503
+				utls.PSSWithSHA384,          // 0x0805
+				utls.PKCS1WithSHA384,        // 0x0501
+				utls.PSSWithSHA512,          // 0x0806
+				utls.PKCS1WithSHA512,        // 0x0601
+				utls.PKCS1WithSHA1,          // 0x0201
 			}},
 			&utls.KeyShareExtension{KeyShares: []utls.KeyShare{{Group: utls.X25519}}},
 			&utls.PSKKeyExchangeModesExtension{Modes: []uint8{utls.PskModeDHE}},

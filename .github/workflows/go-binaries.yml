@@ -170,7 +170,9 @@ jobs:
               echo "## 更新说明"
               echo
               # 最多 30 条：正常一版只有几条，超出说明 tag 关系异常，不再无限拉长
-              git log --no-merges --pretty='- %s' "$PREV..$GITHUB_REF_NAME" | head -30
+              # 只保留面向用户的变更：过滤 ci/chore/docs/test/style/build 类内部提交
+              git log --no-merges --pretty='- %s' "$PREV..$GITHUB_REF_NAME" \
+                | grep -Ev '^- (ci|chore|docs|test|style|build)(\(|:| )' | head -30 || true
             else
               echo "## 更新说明"
               echo
@@ -178,6 +180,26 @@ jobs:
             fi
             echo "RELEASE_BODY_EOF"
           } >> "$GITHUB_OUTPUT"
+      - name: Release 日志格式断言
+        env:
+          BODY: ${{ steps.notes.outputs.body }}
+        run: |
+          # 标题必须是纯版本号 tag
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9] ]]; then
+            echo "::error::Release 标题必须是纯版本号（当前 $GITHUB_REF_NAME）"
+            exit 1
+          fi
+          # 必须带更新说明段落
+          if ! grep -q '^## 更新说明' <<< "$BODY"; then
+            echo "::error::Release 日志缺少「## 更新说明」段落"
+            exit 1
+          fi
+          # 禁止混入验证/部署/镜像/校验/内部备忘等非更新说明内容
+          if grep -Eq '完整变更|镜像 tag|index digest|校验|升级|部署命令|保留（不出站|勿改' <<< "$BODY"; then
+            echo "::error::Release 日志只能包含更新说明，检测到额外段落"
+            exit 1
+          fi
+
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}

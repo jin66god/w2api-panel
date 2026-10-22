@@ -73,7 +73,7 @@ func newDialer() *net.Dialer {
 //     和复用期都能被快速识别（见 dialTimeout/dialKeepAlive 注释）。
 func newTransport() *http.Transport {
 	dialer := newDialer()
-	return &http.Transport{
+	tr := &http.Transport{
 		DialContext: dialer.DialContext,
 		// 空 TLSNextProto（非 nil）真正禁 h2：见函数注释。必须 make 而非 nil——
 		// nil 表示「让标准库注入默认 h2 映射」（kongjianguan 实测：设
@@ -87,6 +87,12 @@ func newTransport() *http.Transport {
 		// 自动读取环境变量中的代理配置
 		Proxy: http.ProxyFromEnvironment,
 	}
+	if tlsFingerprintEnabled() {
+		// 直连 HTTPS 使用官方客户端 ClientHello 指纹；代理场景由 Transport 自建隧道，
+		// DialTLSContext 不会被调用，指纹回退标准库（见 tls_fingerprint.go 注释）。
+		tr.DialTLSContext = newUTLSDialer(dialer)
+	}
+	return tr
 }
 
 // closeIdler 实现该接口的 RoundTripper 支持清空空闲连接池（*http.Transport、

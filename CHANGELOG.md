@@ -3,6 +3,16 @@
 本项目的版本变更记录。更早版本的发布说明见
 [GitHub Releases](https://github.com/jin66god/workbuddy2api-panel/releases)。
 
+## v1.17.6（2026-10-22）
+
+### 安全
+
+- 升级到 Go 1.27.3，修复 **CVE-2026-111943**（`crypto/x509` 对 8 个私钥外泄的
+  eMudhra / emSign 中间 CA 取消信任）。验证时会拒绝包含这些中间证书的证书链，
+  防止中间人攻击。`go.mod` 的 `go` 指令改为 `1.27.3`，Docker 构建镜像
+  改为 `golang:1.27.3-alpine`，CI 通过 `go-version-file: go.mod` 自动使用 1.27.3。
+  该过滤为硬编码、不可关闭，须重新编译才能生效。
+
 ## v1.17.5（2026-10-22）
 
 ### 修复

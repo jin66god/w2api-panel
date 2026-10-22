@@ -956,7 +956,7 @@ http://127.0.0.1:7863/panel/
 
 ### Docker 镜像
 
-CI 用多阶段 Dockerfile（`golang:1.23-alpine` 构建 → `alpine:3.20` 运行）在原生 amd64 / arm64 runner 上分别构建，再合并为一个 multi-arch manifest 推送到 `ghcr.io/jin66god/workbuddy2api-panel`；本地 `docker compose build` 走同一份 Dockerfile。镜像内一次编译全部四个二进制并随镜像分发：
+CI 用多阶段 Dockerfile（`golang:1.27.3-alpine` 构建 → `alpine:3.20` 运行）在原生 amd64 / arm64 runner 上分别构建，再合并为一个 multi-arch manifest 推送到 `ghcr.io/jin66god/workbuddy2api-panel`；本地 `docker compose build` 走同一份 Dockerfile。镜像内一次编译全部四个二进制并随镜像分发：
 
 - **wb2api**（主服务）、**signin_bin**、**login**、**credit** + 脚本（`login.sh` / `signin.sh` / `credit.sh` / `scripts/probe_active.py`）
 - 以 `app` 用户（uid 10001）运行，`app/auths` 与 `app/data` 预建

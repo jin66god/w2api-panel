@@ -3,6 +3,20 @@
 本项目的版本变更记录。更早版本的发布说明见
 [GitHub Releases](https://github.com/jin66god/workbuddy2api-panel/releases)。
 
+## v1.17.4（2026-10-22）
+
+### 新增
+
+- **出站 TLS 指纹对齐官方客户端**：18 个 cipher 顺序、12 个扩展顺序、9 项签名算法
+  全部按真机抓包复刻，直连 HTTPS 走 uTLS 自定义 ClientHello。
+  实测 `JA3=1a3153f314dc13e133dc71d113a81b16`、`JA4=t13d1812h1_5d04281c6031_ef7df7f74e48`，
+  与官方业务 API 逐位一致；`WB2_TLS_FINGERPRINT=0` 可回退标准库。
+
+### 变更
+
+- 镜像仅在打 tag 时构建，日常合并到 main 不再触发双架构构建。
+- Release 日志只保留面向用户的更新说明。
+
 ## v1.17.3（2026-10-22）
 
 ### 修复

@@ -49,8 +49,10 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  # github.repository 自动小写化，得到 ghcr.io/<owner>/<repo>
-  IMAGE_NAME: ${{ github.repository }}
+  # Docker 镜像名必须小写，而本仓库名 WorkBuddy2API 含大写——不能直接用
+  # github.repository（表达式不会小写化，buildx 会报 invalid reference format）。
+  # 包名固定为 ghcr.io/<owner>/workbuddy2api，与 README / docker-compose 一致。
+  IMAGE_NAME: ${{ github.repository_owner }}/workbuddy2api
 
 jobs:
   # 每个平台一个原生 runner 并行构建，按 digest 推送（不打 tag——两个 job 各自打 tag

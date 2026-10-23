@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/jin66god/workbuddy2api-panel/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/jin66god/workbuddy2api-panel?style=flat-square&color=2496ED"></a>
+  <a href="https://github.com/jin66god/WorkBuddy2API/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/jin66god/WorkBuddy2API?style=flat-square&color=2496ED"></a>
   <img alt="Go" src="https://img.shields.io/badge/Go-1.23-00ADD8?logo=go&logoColor=white&style=flat-square">
   <img alt="API" src="https://img.shields.io/badge/API-OpenAI_Compatible-412991?style=flat-square">
   <img alt="Platform" src="https://img.shields.io/badge/Platform-amd64%20%7C%20arm64-0DBD8B?style=flat-square">
@@ -23,13 +23,13 @@
   <a href="#web-管理面板">面板</a> ·
   <a href="#api-端点">API</a> ·
   <a href="#常见问题">FAQ</a> ·
-  <a href="https://github.com/jin66god/workbuddy2api-panel/releases">下载</a>
+  <a href="https://github.com/jin66god/WorkBuddy2API/releases">下载</a>
 </p>
 
 ---
 
-> **本仓库**是 [linguo2625469/workbuddy2api-panel](https://github.com/linguo2625469/workbuddy2api-panel) 的增强分支（fork），面向**个人自用**的多账号运维。
-> 二进制、Docker 镜像与 Release 均以本仓库为准：`ghcr.io/jin66god/workbuddy2api-panel`。
+> **本仓库**是 [linguo2625469/workbuddy2api-panel](https://github.com/linguo2625469/workbuddy2api-panel) 的独立增强分支（前身为该项目的 fork，现已迁至独立仓库），面向**个人自用**的多账号运维。
+> 二进制、Docker 镜像与 Release 均以本仓库为准：`ghcr.io/jin66god/workbuddy2api`。
 >
 > ⚠️ 仅限管理本人授权的账号，**禁止**批量注册、转售额度、加壳或卡密分发。详见[使用声明](#使用声明必读)。
 
@@ -205,7 +205,7 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容反向代理网关**：通过
 | 补偿可观测 | 先查后领、截止倒计时、逐号 / 全量领取 |
 | 连登兑换 | 签到排程末尾自动兑换已解锁档位并抽完奖 |
 
-> **v1.15.0** 合并社区 PR #223（环境变量代理）、#220（`cn.chat_base`）、#225（模型黑名单）、#221（11158 与 Global 可用性）、#212（到期快照口径）、#158（地区调度）。历史演进见 [Releases](https://github.com/jin66god/workbuddy2api-panel/releases)。
+> **v1.15.0** 合并社区 PR #223（环境变量代理）、#220（`cn.chat_base`）、#225（模型黑名单）、#221（11158 与 Global 可用性）、#212（到期快照口径）、#158（地区调度）。历史演进见 [Releases](https://github.com/jin66god/WorkBuddy2API/releases)。
 
 ## 架构总览
 
@@ -252,13 +252,13 @@ mkdir -p auths data && cp config.example.json config.json
 docker run -d --name workbuddy2api \
   -p 7863:7863 -e TZ=Asia/Shanghai \
   -v ./auths:/app/auths -v ./data:/app/data -v ./config.json:/app/config.json \
-  ghcr.io/jin66god/workbuddy2api-panel:latest
+  ghcr.io/jin66god/workbuddy2api:latest
 
 # 3. 健康检查（无可用账号时返回 503）
 curl -s http://localhost:7863/healthz
 ```
 
-> **首次发布后须将包设为公开**：GitHub 仓库页 → Packages → `workbuddy2api-panel` →
+> **首次发布后须将包设为公开**：GitHub 仓库页 → Packages → `workbuddy2api` →
 > Package settings → Change visibility → Public，否则拉取需要 `docker login ghcr.io`。
 >
 > 镜像 tag 规则：`main` 分支推送 `latest` / `main` / `sha-xxxxxx`；打 `v*` tag 额外发布
@@ -271,8 +271,8 @@ curl -s http://localhost:7863/healthz
 
 ```bash
 # 1. 克隆（只需要 compose 文件与配置模板）
-git clone https://github.com/jin66god/workbuddy2api-panel.git
-cd workbuddy2api-panel
+git clone https://github.com/jin66god/WorkBuddy2API.git
+cd WorkBuddy2API
 
 # 2. 准备配置（compose 挂载此文件，缺失会导致容器启动失败）
 cp config.example.json config.json
@@ -957,7 +957,7 @@ http://127.0.0.1:7863/panel/
 
 ### Docker 镜像
 
-CI 用多阶段 Dockerfile（`golang:1.27.3-alpine` 构建 → `alpine:3.20` 运行）在原生 amd64 / arm64 runner 上分别构建，再合并为一个 multi-arch manifest 推送到 `ghcr.io/jin66god/workbuddy2api-panel`；本地 `docker compose build` 走同一份 Dockerfile。镜像内一次编译全部四个二进制并随镜像分发：
+CI 用多阶段 Dockerfile（`golang:1.27.3-alpine` 构建 → `alpine:3.20` 运行）在原生 amd64 / arm64 runner 上分别构建，再合并为一个 multi-arch manifest 推送到 `ghcr.io/jin66god/workbuddy2api`；本地 `docker compose build` 走同一份 Dockerfile。镜像内一次编译全部四个二进制并随镜像分发：
 
 - **wb2api**（主服务）、**signin_bin**、**login**、**credit** + 脚本（`login.sh` / `signin.sh` / `credit.sh` / `scripts/probe_active.py`）
 - 以 `app` 用户（uid 10001）运行，`app/auths` 与 `app/data` 预建
@@ -1030,7 +1030,7 @@ python3 scripts/probe_max_tokens.py   --base http://127.0.0.1:7863/v1 --key sk-x
 
 - **发布产物**：每个 `v*` tag 由 CI 构建五平台二进制 Release（附 `checksums.txt`）与 GHCR 双架构镜像（`linux/amd64` + `linux/arm64` 指向同一 manifest）
 - 登录 / 签到 / 积分工具：`./login.sh` / `./signin.sh` / `./credit.sh`
-- **产物校验**：Release 资产用 `sha256sum -c checksums.txt` 校验；镜像架构与 digest 可用 `docker buildx imagetools inspect ghcr.io/jin66god/workbuddy2api-panel:<tag>` 核对
+- **产物校验**：Release 资产用 `sha256sum -c checksums.txt` 校验；镜像架构与 digest 可用 `docker buildx imagetools inspect ghcr.io/jin66god/workbuddy2api:<tag>` 核对
 - 上游 CodeBuddy 属腾讯系商业产品，本项目是其**非官方 OpenAI 兼容网关**；使用其账号做 API 网关涉及目标平台服务条款与账号风险，作者不对账号封禁、条款违约或使用结果负责
 
 ### 4. 授权使用边界

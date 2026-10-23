@@ -2,7 +2,7 @@ services:
   wb2api:
     # 默认使用 CI 发布的多架构镜像（linux/amd64 + linux/arm64），无需本地构建。
     # 版本可用环境变量锁定：WB2API_TAG=1.16.2 docker compose up -d
-    image: ghcr.io/jin66god/workbuddy2api-panel:${WB2API_TAG:-latest}
+    image: ghcr.io/jin66god/workbuddy2api:${WB2API_TAG:-latest}
     # 需要从源码构建时（main / 自行改代码）：
     #   docker compose build --no-cache && docker compose up -d
     # 注意：image 与 build 同时存在时 compose 不会自动构建，必须显式 --build。

@@ -1,3 +1,7 @@
+> ⚠️ **本仓库已停止维护并归档。**
+> 项目已迁移到独立仓库：[jin66god/workbuddy2api-panel](https://github.com/jin66god/workbuddy2api-panel)
+> 最新版本、Issues、Releases 与 Docker 镜像均以新仓库为准；本仓库仅保留历史记录。
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/DGZSbot/ai-icon/refs/heads/main/WorkBuddy.png" alt="WorkBuddy2API" width="110">
 </p>

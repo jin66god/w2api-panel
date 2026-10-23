@@ -2011,3 +2011,86 @@ func TestModelsHiddenFiltered(t *testing.T) {
 		t.Errorf("hidden model leaked into /v1/models: ids=%v", ids)
 	}
 }
+
+// TestChat401TokenRejectedForceRefresh 网关层 401（APISIX HTML，无业务信封）：
+// 与 12153 不同，本地 expiresAt 未到时上游也可能提前吊销 token。处置必须是
+// 「强制 refresh 一次 → 用新 token 重试同一账号」，而不是直接换号/禁用。
+// 回归 issue #5：此前 401 落 ErrClient，只换号不刷新，面板里表现为「全部账号
+// 401、必须人工重登」，且 balance 任务每 5 分钟无限空刷。
+func TestChat401TokenRejectedForceRefresh(t *testing.T) {
+	var chatCalls, refreshCalls int
+	mkResp := func(status int, ct, body string) *http.Response {
+		return &http.Response{
+			StatusCode: status,
+			Header:     http.Header{"Content-Type": []string{ct}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}
+	}
+	up := &upstream.Client{
+		HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if strings.Contains(r.URL.Path, "/v2/plugin/auth/token/refresh") {
+				refreshCalls++
+				return mkResp(200, "application/json",
+					`{"code":0,"data":{"accessToken":"at-new","refreshToken":"rt-new","expiresIn":3600}}`), nil
+			}
+			chatCalls++
+			if r.Header.Get("Authorization") == "Bearer at-new" {
+				return mkResp(200, "text/event-stream", sseOK), nil
+			}
+			return mkResp(401, "text/html", `<html><h1>401 Authorization Required</h1></html>`), nil
+		})},
+		ChatBaseCN:    "https://fake.example",
+		BillingBaseCN: "https://fake.example",
+	}
+	// expiresAt 在未来（NeedsRefresh=false）：确保走的是 401 触发的强制刷新路径。
+	p := testPoolWith(&auth.Auth{UID: "u1", AccessToken: "at-old", RefreshToken: "rt-old", ExpiresAt: 9999999999})
+	h := NewHandler(Config{Pool: p, Upstream: up})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"glm-5.2","messages":[]}`)))
+	if rec.Code != 200 {
+		t.Fatalf("code=%d body=%s（应 refresh 后重试成功）", rec.Code, rec.Body)
+	}
+	if refreshCalls != 1 {
+		t.Errorf("refresh 次数=%d want 1", refreshCalls)
+	}
+	if chatCalls != 2 {
+		t.Errorf("chat 次数=%d want 2（旧 token 401 + 新 token 重试）", chatCalls)
+	}
+	st, _ := p.Status("u1")
+	if st.Disabled || st.Cooling {
+		t.Errorf("refresh 成功后账号不应被罚: %+v", st)
+	}
+}
+
+// TestChat401TokenRejectedRefreshFailsNotDisabledOnce 强制刷新失败时只累计一次
+// 连续失效计数，不因单次 401 直接禁用（阈值 3，容忍网关抖动）。
+func TestChat401TokenRejectedRefreshFailsNotDisabledOnce(t *testing.T) {
+	up := &upstream.Client{
+		HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			body := `<html><h1>401 Authorization Required</h1></html>`
+			if strings.Contains(r.URL.Path, "/v2/plugin/auth/token/refresh") {
+				body = `{"code":12153,"msg":"Offline user session not found"}`
+			}
+			return &http.Response{
+				StatusCode: 401,
+				Header:     http.Header{"Content-Type": []string{"text/html"}},
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}, nil
+		})},
+		ChatBaseCN:    "https://fake.example",
+		BillingBaseCN: "https://fake.example",
+	}
+	p := testPoolWith(&auth.Auth{UID: "u1", AccessToken: "at-old", RefreshToken: "rt-old", ExpiresAt: 9999999999})
+	h := NewHandler(Config{Pool: p, Upstream: up})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"glm-5.2","messages":[]}`)))
+	if rec.Code == 200 {
+		t.Fatalf("refresh 失败时不应成功: body=%s", rec.Body)
+	}
+	st, _ := p.Status("u1")
+	if st.Disabled {
+		t.Errorf("单次 401 不应直接禁用（连续 %d 次才禁用）: %+v", pool.SessionDeadThreshold(), st)
+	}
+}

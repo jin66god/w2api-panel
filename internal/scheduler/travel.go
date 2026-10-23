@@ -71,7 +71,7 @@ func (s *Scheduler) runTravel(spread bool) {
 			continue // D4 门控：global 无 CN 任务体系，不发起任何上游调用
 		}
 		if !a.SupportsPersonalGrowth() {
-			continue // 企业版 / 企业切换会话 / 静态 API Key 均无成长体系（/activity/growth/* 上游一律 403 或不计分），不发起任何上游调用
+			continue // 企业版 / 静态 API Key 无成长体系（/activity/growth/* 上游一律 403），不发起任何上游调用；token_source 不门控（issue #4）
 		}
 		if !first {
 			time.Sleep(travelAccountDelay)

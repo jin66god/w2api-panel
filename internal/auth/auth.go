@@ -232,19 +232,20 @@ func (a *Auth) IsAPIKey() bool {
 func (a *Auth) UsesEnterpriseBilling() bool { return a.IsEnterprise() || a.IsAPIKey() }
 
 // SupportsPersonalGrowth 报告账号是否具备个人成长体系（签到 / 成长任务 / 连登管家 /
-// 猫猫旅行 / 夜猫子）。以下三类都没有该体系：
-//   - 企业版：上游一律拒绝（400 code 10001 / 403 growth-only）；
-//   - 企业切换会话（token_source=enterprise_switch）：/v2/report 返回 200 但被静默
-//     丢弃，连登/成长进度永不跳动（issue #162 实测）；
-//   - 静态 API Key：根本没有个人账号身份。
+// 猫猫旅行 / 夜猫子）。企业版与静态 API Key 都没有该体系。
 //
-// scheduler 五类任务与 panel 成长入口统一用本方法门控，避免对注定失败的端点空发请求。
-func (a *Auth) SupportsPersonalGrowth() bool { return !a.IsEnterpriseSession() && !a.IsAPIKey() }
+// **不要用 token_source=enterprise_switch 做门控**（2026-10-23 修正）：该声明只记录
+// 本次授权走了企业切换流程，不代表账号当前处在企业上下文。上游 fork 与社区均有实测
+// （misakano7545 #240、本库 #4）：仅带该声明、enterpriseId 为空的**个人号**成长任务
+// 照常 claimed、行为事件正常计分；本库 issue #162 当时观测到的「/v2/report 被静默
+// 丢弃」属上游临时状态（同帖次日自愈），不能作为稳定判据。把它当硬门控会误伤正常
+// 个人号——issue #4「微信扫码登录后成长任务无法执行」的直接成因。
+// 企业形态一律以 enterpriseId 为准；token_source 只保留提示用途（见 IsEnterpriseSession）。
+func (a *Auth) SupportsPersonalGrowth() bool { return !a.IsEnterprise() && !a.IsAPIKey() }
 
 // SupportsPersonalEndpoints 报告账号是否可调用「签到 / 任务列表」这类显式报错的个人端点。
-// 与 SupportsPersonalGrowth（执行类门控）刻意区分：企业切换会话的 /v2/report 会被
-// 静默丢弃，但签到与任务列表实测正常（issue #162：签到失败是显式错误、列表 200 且完整），
-// 过度门控会让这类账号失去签到与任务可见性。企业版与静态 API Key 仍无个人体系。
+// 与 SupportsPersonalGrowth（执行类门控）刻意区分：签到与任务列表是显式报错的端点，
+// 门控过宽会让本可读写的账号失去签到与任务可见性。企业版与静态 API Key 仍无个人体系。
 func (a *Auth) SupportsPersonalEndpoints() bool { return !a.IsEnterprise() && !a.IsAPIKey() }
 
 // IsEnterprise 报告账号是否为企业版（auth 文件带非空 enterpriseId）。
@@ -266,10 +267,14 @@ func (a *Auth) SupportsPersonalEndpoints() bool { return !a.IsEnterprise() && !a
 // 无需加锁——Realm() 加锁是因为 realm/Domain 会被 RefreshToken 在锁内改写。
 func (a *Auth) IsEnterprise() bool { return strings.TrimSpace(a.EnterpriseID) != "" }
 
-// IsEnterpriseSession 报告当前凭证是否处于「企业上下文」：
-// 账号本身是企业版（IsEnterprise），或 AccessToken 签发自**企业切换会话**
-// （JWT payload 带 token_source=enterprise_switch——浏览器在企业空间状态下
-// 完成 OAuth 授权时签发）。
+// IsEnterpriseSession 报告当前凭证是否带「企业上下文」标记：账号本身是企业版
+// （IsEnterprise），或 AccessToken 的 JWT payload 带 token_source=enterprise_switch
+// （浏览器在企业空间状态下完成 OAuth 授权时签发）。
+//
+// **只用于提示/观测，不参与任何任务门控**（2026-10-23 修正）。token_source 记录的是
+// 授权来路而非账号身份：仅带该声明的个人号（enterpriseId 为空）成长任务实测照常
+// 计分（misakano7545 #240、本库 #4），拿它门控会误伤正常个人号。门控一律用
+// SupportsPersonalGrowth（只看 enterpriseId 与 API Key）。
 //
 // 为什么单独一站：企业切换会话与真企业版的上游表现**不同**（实测 2026-10-12，
 // 同一时刻与个人号 A/B 对照）——成长任务列表 / 额度查询 / 领养 Buddy 等**读端点

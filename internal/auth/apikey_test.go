@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 )
@@ -82,6 +83,8 @@ func TestUsesEnterpriseBilling(t *testing.T) {
 // TestSupportsPersonalGrowth 个人成长体系门控：企业版与静态 API Key 均无该体系，
 // 只有个人号支持（对照）。
 func TestSupportsPersonalGrowth(t *testing.T) {
+	// 仅带 token_source=enterprise_switch 的个人号（enterpriseId 为空）：门控必须放行。
+	switchedTok := "hdr." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"u1","token_source":"enterprise_switch"}`)) + ".sig"
 	cases := []struct {
 		name string
 		ent  string
@@ -91,6 +94,9 @@ func TestSupportsPersonalGrowth(t *testing.T) {
 		{"个人号", "", "at", true},
 		{"企业版", "ent-1", "at", false},
 		{"静态 API Key", "", "ck_abc.def", false},
+		// 企业切换会话声明只是授权来路，个人号（enterpriseId 空）照常支持成长体系
+		// （issue #4 / misakano7545 #240）：该声明不得参与门控。
+		{"个人号带 enterprise_switch 声明", "", switchedTok, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

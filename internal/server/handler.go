@@ -662,6 +662,9 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tried := map[string]bool{}
+	// forcedRefresh 记录本请求内已因 401 token rejected 强制刷新过的账号：
+	// 每账号最多一次，刷新成功重排重试，避免「401 → refresh → 仍 401」死循环。
+	forcedRefresh := map[string]bool{}
 	var lastErr error
 	// modelBlock 记录本次是否因「模型级冷却」而选不到号（下方 acct==nil 分支填充）。
 	// 默认零值 Blocked=false = 按既有的"没有可用账号"口径报错。
@@ -1133,6 +1136,50 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 				st.outcome = reqlog.OutcomeHTTPError
 				return
 			}
+			// 401 token rejected（网关层，无业务信封）：与 12153 不同，本地
+			// expiresAt 未到时上游也可能提前吊销 token，refresh 有机会自愈。
+			// 每账号每请求强制刷新一次：成功 → 重排本号（不消耗换号名额）；
+			// 失败 → 会话链已失效，按连续计数软着陆（阈值 3 次），达阈禁用。
+			if kind == upstream.ErrTokenRejected {
+				if !forcedRefresh[acct.UID] {
+					forcedRefresh[acct.UID] = true
+					if rerr := h.cfg.Upstream.RefreshToken(acct); rerr == nil {
+						if serr := acct.SaveAtomicRetry(); serr != nil {
+							log.Printf("ERR: [server] 401 refresh acct=%s: save auth failed: %v", logfmt.Label(acct.UID, acct.Nickname), serr)
+						}
+						h.cfg.Pool.ClearSessionDead(acct.UID)
+						log.Printf("INFO: [server] 401 token rejected acct=%s model=%s: refreshed, retrying same account",
+							logfmt.Label(acct.UID, acct.Nickname), bareModel)
+						fail(acct.UID)
+						delete(tried, acct.UID)
+						i-- // 刷新后重试同号不占换号名额（forcedRefresh 保证每号至多一次）
+						continue
+					} else {
+						lastErr = rerr
+						log.Printf("WARN: [server] 401 token rejected acct=%s model=%s: refresh failed: %v",
+							logfmt.Label(acct.UID, acct.Nickname), bareModel, rerr)
+						if h.cfg.Pool.NoteSessionDead(acct.UID) {
+							log.Printf("WARN: [server] 账号 %s 连续 %d 次 token 失效 → 禁用（需重新登录）",
+								logfmt.Label(acct.UID, acct.Nickname), pool.SessionDeadThreshold())
+						}
+						fail(acct.UID)
+						if !rotateBackoff(i, r.Context()) {
+							break
+						}
+						continue
+					}
+				}
+				if h.cfg.Pool.NoteSessionDead(acct.UID) {
+					log.Printf("WARN: [server] 账号 %s 连续 %d 次 token 失效 → 禁用（需重新登录）",
+						logfmt.Label(acct.UID, acct.Nickname), pool.SessionDeadThreshold())
+				}
+				lastErr = &upstream.Error{Kind: kind, Status: status, Msg: string(respBody), RetryAfter: uerr.RetryAfter}
+				fail(acct.UID)
+				if !rotateBackoff(i, r.Context()) {
+					break
+				}
+				continue
+			}
 			// lastErr 携带完整 body（uerr.Msg 在 upstream 侧截断 200 字符，透传语义
 			// 要求原文全量）+ Kind/RetryAfter（末端映射与冷却时长共用）。
 			lastErr = &upstream.Error{Kind: kind, Status: status, Msg: string(respBody), RetryAfter: uerr.RetryAfter}
@@ -1344,6 +1391,11 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusTooManyRequests
 			code = "rate_limit_exceeded"
 			msg = "rate limited: all accounts are cooling down, please wait a moment and try again"
+		case upstream.ErrTokenRejected:
+			// 全池 401 网关拒绝（refresh 也救不回）：503 + 明确 code，
+			// 让客户端与运维一眼区分「过载」与「凭证失效、需重新登录」。
+			code = "token_rejected"
+			msg = "all accounts' credentials were rejected by upstream (401); re-login required"
 		case upstream.ErrWafBlock:
 			if h.wafIP.active() {
 				// IP 级拦截措辞（fail-fast 终止路径）：网关出口 IP 被 WAF 拦截、
@@ -1613,6 +1665,14 @@ func (h *Handler) applyErrorPolicy(uid string, kind upstream.ErrKind, body, mode
 			return
 		}
 		h.cfg.Pool.CooldownSoftRate(uid, jitterDur(wafCooldownBase), time.Time{}, "waf 403 block")
+	case upstream.ErrTokenRejected:
+		// 网关层 401（无业务信封）：chat 循环已强制 refresh 过一次，能到这里
+		// 说明刷新救不回（或来自非 chat 路径）。与 12153 同用连续计数软着陆：
+		// 单次可能是网关抖动，连续 3 次才禁用，避免一次 401 就永久杀号。
+		if h.cfg.Pool.NoteSessionDead(uid) {
+			log.Printf("WARN: [server] 账号 %s 连续 %d 次 token 失效（401 网关拒绝）→ 禁用（需重新登录）",
+				logfmt.Label(uid, ""), pool.SessionDeadThreshold())
+		}
 	case upstream.ErrSessionDead:
 		h.cfg.Pool.Disable(uid, "12153 session dead")
 	case upstream.ErrNotFound:

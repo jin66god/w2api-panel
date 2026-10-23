@@ -79,7 +79,7 @@ func (p *Panel) tasksScanAll(w http.ResponseWriter, r *http.Request) {
 			}
 			// 企业版与静态 API Key 账号门控：二者无个人成长体系
 			// （GET /v2/activity/growth/tasks 上游 403「growth system is only available
-			// for personal users」）。企业切换会话仍可读列表（issue #162 实测 200 且完整），
+			// for personal users」）。企业形态只看 enterpriseId（token_source 不参与，issue #4），
 			// 故用 SupportsPersonalEndpoints，避免过度门控隐藏任务。
 			if !a.SupportsPersonalEndpoints() {
 				return
@@ -224,11 +224,11 @@ func (p *Panel) startGrowthQueue(concurrency int, growth bool) (started bool, to
 			if a.IsGlobal() {
 				return
 			}
-			// 无个人成长体系账号门控（企业版 / 企业切换会话 / 静态 API Key）：
-			// 行为事件会被上游静默丢弃或直接 403，入队只会白耗真实对话配额，
-			// 故不入队并记录可定位的跳过原因（见 auth.SupportsPersonalGrowth）。
+			// 无个人成长体系账号门控（企业版 / 静态 API Key）：行为事件会被上游
+			// 直接 403，入队只会白耗真实对话配额，故不入队并记录可定位的跳过原因
+			// （见 auth.SupportsPersonalGrowth；不按 token_source 门控，issue #4）。
 			if !a.SupportsPersonalGrowth() {
-				log.Printf("panel: WARN 队列跳过 uid=%s nickname=%q：账号无个人成长体系（企业版/企业切换会话/静态 API Key），成长任务行为事件会被上游忽略", a.UID, a.Nickname)
+				log.Printf("panel: WARN 队列跳过 uid=%s nickname=%q：账号无个人成长体系（企业版或静态 API Key），成长任务无法执行", a.UID, a.Nickname)
 				return
 			}
 			if growth {

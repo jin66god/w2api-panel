@@ -228,7 +228,7 @@ func TestSearchHTTPErrorClassified(t *testing.T) {
 		body   string
 		want   ErrKind
 	}{
-		{http.StatusUnauthorized, `<html>401 Authorization Required</html>`, ErrClient},
+		{http.StatusUnauthorized, `<html>401 Authorization Required</html>`, ErrTokenRejected},
 		{http.StatusTooManyRequests, `{"code":429,"msg":"rate limit exceeded, will reset in 60s"}`, ErrSoftRate},
 		{http.StatusInternalServerError, `{"code":500,"msg":"internal error"}`, ErrServer},
 	}

@@ -553,8 +553,8 @@ func (s *Scheduler) runCheckin(spread bool) {
 		// 不支持该操作」；API Key 无个人账号身份）：跳过签到，但**不 continue**——
 		// 下方余额查询照常跑（企业额度走 get-enterprise-user-usage 口径，且是
 		// credit_floor 判定与面板额度展示的唯一数据源）。
-		// 企业切换会话**不**跳过：签到对该形态实测正常，静默失效只发生在 /v2/report
-		// 类行为事件（issue #162），故用 SupportsPersonalEndpoints 而非执行类门控。
+		// token_source=enterprise_switch 不再是门控判据（issue #4）：签到与成长任务
+		// 对该形态实测正常，企业形态一律以 enterpriseId 为准。
 		if a.SupportsPersonalEndpoints() {
 			if err := s.cfg.Upstream.DailyCheckin(a); err != nil {
 				// "今天已签到"是幂等成功（上游对重复签到返回 code!=0），不再当失败打 error 行。
@@ -626,7 +626,7 @@ func (s *Scheduler) runActivityCtx(ctx context.Context, spread bool) {
 		if a == nil || a.AccessTokenValue() == "" {
 			continue
 		}
-		// 企业版 / 企业切换会话 / 静态 API Key 均无个人成长体系：/v2/report 本身返回 200
+		// 企业版 / 静态 API Key 无个人成长体系：/v2/report 本身返回 200
 		// （不报错），但它唯一的作用是点亮 growth 连登天数 / 解锁 first_buddy 领养——
 		// 这几类账号都是 403 或被静默丢弃，即**零收益**。该类"静默无效"最易被忽略
 		// （日志无异常），故显式跳过，不给上游多发一次请求。
@@ -757,8 +757,36 @@ func (s *Scheduler) RunBalanceRefreshNow() {
 			defer wg.Done()
 			remain, total, expiring, earliestAt, earliestRemaining, buckets, err := s.cfg.Upstream.UserResourceSnapshot(a, expiringSoon)
 			if err != nil {
-				log.Printf("balance %s: %v", logfmt.Label(uid, a.Nickname), err)
-				return
+				// 401 网关层 token 失效：本地 expiresAt 未到时上游也可能提前吊销，
+				// 与 12153 不同，refresh 有机会自愈。强制刷新一次并重试本号；
+				// 仍失败才计入连续失效（达阈禁用），避免每 5 分钟无限空刷 401。
+				var ue *upstream.Error
+				if errors.As(err, &ue) && ue.Kind == upstream.ErrTokenRejected {
+					if rerr := s.cfg.Upstream.RefreshToken(a); rerr == nil {
+						if serr := a.SaveAtomicRetry(); serr != nil {
+							log.Printf("ERR: [scheduler] balance refresh acct=%s: save auth failed: %v",
+								logfmt.Label(uid, a.Nickname), serr)
+						}
+						s.cfg.Pool.ClearSessionDead(uid)
+						log.Printf("INFO: [scheduler] balance 401 acct=%s: token refreshed, retrying",
+							logfmt.Label(uid, a.Nickname))
+						remain, total, expiring, earliestAt, earliestRemaining, buckets, err =
+							s.cfg.Upstream.UserResourceSnapshot(a, expiringSoon)
+					} else {
+						err = rerr
+					}
+				}
+				if err != nil {
+					log.Printf("balance %s: %v", logfmt.Label(uid, a.Nickname), err)
+					var fe *upstream.Error
+					if errors.As(err, &fe) && (fe.Kind == upstream.ErrTokenRejected || fe.Kind == upstream.ErrSessionDead) {
+						if s.cfg.Pool.NoteSessionDead(uid) {
+							log.Printf("WARN: [scheduler] 账号 %s 连续 %d 次 token 失效 → 禁用（需重新登录）",
+								logfmt.Label(uid, a.Nickname), pool.SessionDeadThreshold())
+						}
+					}
+					return
+				}
 			}
 			s.cfg.Pool.ReenableIfCredits(uid, remain, total)
 			s.cfg.Pool.SetCreditsSnapshot(uid, pool.CreditsSnapshot{

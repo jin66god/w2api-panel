@@ -69,7 +69,12 @@ func TestClassify(t *testing.T) {
 		{401, `{"code":12153,"msg":"Offline user session not found, rate limit"}`, ErrSessionDead},
 		{401, `Offline user session not found`, ErrSessionDead},
 		{401, `{"code":12153,"msg":"Offline user session not found"}`, ErrSessionDead},
-		{401, `{"code":9999,"msg":"bad token"}`, ErrClient},
+		// 401 无任何业务 marker → 网关层 token 被拒（APISIX HTML / 未知 body）：
+		// 与 12153 区分，调用方先强制 refresh 一次再决定是否判死。
+		{401, `{"code":9999,"msg":"bad token"}`, ErrTokenRejected},
+		{401, `<html><h1>401 Authorization Required</h1></html>`, ErrTokenRejected},
+		// 401 + 11140 仍是账号级授权故障（marker 更具体，优先于通用 401）。
+		{401, `{"code":11140,"msg":"request illegal"}`, ErrAccountFault},
 		{500, `boom`, ErrServer},
 		{503, `unavailable`, ErrServer},
 		{200, ``, ErrNone},

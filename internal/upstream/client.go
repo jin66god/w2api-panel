@@ -33,6 +33,7 @@ const (
 	ErrHardCredit                    // 余额不足（402 或 body 关键词）→ 长冷却
 	ErrSoftRate                      // 429 软限流 → 短冷却
 	ErrSessionDead                   // 401 + 12153 offline session 失效 → 禁用
+	ErrTokenRejected                 // 401 无业务信封（APISIX 网关直接判 token 无效）→ 先强制 refresh 一次，失败才按 session dead 累计
 	ErrNotFound                      // 404 上游偶发 → 短冷却，不累计错误计数（防雪崩）
 	ErrServer                        // 5xx 上游故障
 	ErrContentBlocked                // 内容策略拦截（400 + 审核文案）→ 不罚账号，走降级重试
@@ -56,6 +57,8 @@ func (k ErrKind) String() string {
 		return "soft_rate"
 	case ErrSessionDead:
 		return "session_dead"
+	case ErrTokenRejected:
+		return "token_rejected"
 	case ErrNotFound:
 		return "not_found"
 	case ErrServer:
@@ -608,6 +611,13 @@ func Classify(status int, body string) ErrKind {
 		if strings.Contains(lower, strings.ToLower(m)) || strings.Contains(body, m) {
 			return ErrAccountFault
 		}
+	}
+	// HTTP 401 且未命中任何业务 marker：APISIX 网关层直接判 token 无效（响应体是
+	// openresty 的 HTML `401 Authorization Required`，没有 {code,msg} 信封）。
+	// 与 12153 session dead 区分：该类本地 expiresAt 往往未到（上游提前吊销），
+	// refresh 有机会自愈，调用方先强制刷新一次再试；刷新失败才按需重登处置。
+	if status == http.StatusUnauthorized {
+		return ErrTokenRejected
 	}
 	// 14018 是明确的账号积分耗尽业务码。它必须先于通用 429 兜底，否则会被误判为
 	// 可自愈的软限流并在全池冷却时反复兜底选中（issue #175）。仅按结构化 code
